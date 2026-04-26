@@ -1,0 +1,409 @@
+{
+  "dataset": "sider",
+  "total_loaded": 50,
+  "total_encoded": 50,
+  "total_predicted": 49,
+  "failed": 1,
+  "metrics": {
+    "accuracy": 0.5918367346938775,
+    "f1": 0.6153846153846154,
+    "precision": 0.5517241379310345,
+    "recall": 0.6956521739130435,
+    "auc": 0.5978260869565217
+  },
+  "details": [
+    {
+      "smiles": "CCCCC(=O)OCC(=O)[C@]1(C[C@@H](C2=C(C3=C(C(=C2C1)O)C(=O)C4=C(C3=O)C(=CC=C4)OC)O)OC5CC(C(C(O5)C)O)NC(=O)C(F)(F)F)O",
+      "true_label": 0,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared structural features\n\nLet's inspect the target molecule:\nTarget (sider_mol_0): CCCCC(=O)OCC(=O)[C@]1(C[C@@H](C2=C(C3=C(C(=C2C1)O)C(=O)C4=C(C3=O)C(=CC=C4)OC)O)OC5CC(C(C(O5)C)O)NC(=O)C(F)"
+    },
+    {
+      "smiles": "CCCN1CCCCC1C(=O)NC2=C(C=CC=C2C)C",
+      "true_label": 1,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Let's reason stepwise:\n\nStep 1 — Shared Structural Features\n\nTarget molecule (sider_mol_1) SMILES: CCCN1CCCCC1C(=O)NC2=C(C=CC=C2C)C\n\nKey features:\n- Secondary amide (C(=O)N)\n- Aromatic ring (toluene-l"
+    },
+    {
+      "smiles": "CN(C)CCC=C1C2=CC=CC=C2C=CC3=CC=CC=C31",
+      "true_label": 1,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared structural features:\nExamining the target molecule (CN(C)CCC=C1C2=CC=CC=C2C=CC3=CC=CC=C31), it is a highly conjugated, polycyclic aromatic structure reminiscent of tricyclic scaffolds "
+    },
+    {
+      "smiles": "CCCC1OC2CC3C4CCC5=CC(=O)C=CC5(C4C(CC3(C2(O1)C(=O)CO)C)O)C",
+      "true_label": 0,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared Structural Features:\nThe target molecule (sider_mol_3: CCCC1OC2CC3C4CCC5=CC(=O)C=CC5(C4C(CC3(C2(O1)C(=O)CO)C)O)C) and the source references share:\n- Highly fused polycyclic ring system"
+    },
+    {
+      "smiles": "C[N+]1=CC=CC(=C1)OC(=O)N(C)C",
+      "true_label": 0,
+      "prediction": 0,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Let's proceed step by step.\n\nStep 1 — Identify shared structural features\n\nTarget molecule (C[N+]1=CC=CC(=C1)OC(=O)N(C)C):\n- Has a substituted aromatic ring (N-methylpyridinium core)\n- Contains an aro"
+    },
+    {
+      "smiles": "CCCC(=O)OC1(CCC2C1(CC(C3C2CCC4=CC(=O)CCC34C)O)C)C(=O)CO",
+      "true_label": 0,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Let's reason step-by-step:\n\nStep 1 — Shared structural features:\nThe target molecule (CCCC(=O)OC1(CCC2C1(CC(C3C2CCC4=CC(=O)CCC34C)O)C)C(=O)CO) is a highly lipophilic, polycyclic compound with multiple"
+    },
+    {
+      "smiles": "C1=CC=C(C=C1)N2C=C(C=C(C2=O)C3=CC=CC=C3C#N)C4=CC=CC=N4",
+      "true_label": 0,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared Structural Features:\nThe target molecule:\nSMILES: C1=CC=C(C=C1)N2C=C(C=C(C2=O)C3=CC=CC=C3C#N)C4=CC=CC=N4\n\nLet’s break down the main substructures:\n- Multiple fused and connected aromat"
+    },
+    {
+      "smiles": "C1=CC(=CC=C1COC(CN2C=CN=C2)C3=C(C=C(C=C3)Cl)Cl)Cl",
+      "true_label": 0,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared structural features:\n\nThe target molecule (sider_mol_7):\n\n- Chlorinated aromatic rings (two aryl rings, each bearing Cl)\n- Ether linkage (–COC–) connecting the aromatic system\n- Substi"
+    },
+    {
+      "smiles": "CC(C(=O)C1=CC(=CC=C1)Cl)NC(C)(C)C",
+      "true_label": 1,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared structural features:\nThe target molecule (CC(C(=O)C1=CC(=CC=C1)Cl)NC(C)(C)C) contains:\n- A para-chlorophenyl ring (aromatic with a para-chloro substituent)\n- An isobutyryl amide linkag"
+    },
+    {
+      "smiles": "CC1=C(C(=CC=C1)[C@@H](C)C2=CN=CN2)C",
+      "true_label": 1,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Identify shared structural features:\n\nThe target molecule (sider_mol_9, SMILES: CC1=C(C(=CC=C1)[C@@H](C)C2=CN=CN2)C) contains:\n- A substituted aromatic ring (benzene), methylated at two posit"
+    },
+    {
+      "smiles": "CC1=C(C(=NO1)C2=CC=CC=C2)C3=CC=C(C=C3)S(=O)(=O)N",
+      "true_label": 1,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared structural features:\n\nThe target molecule (sider_mol_11) SMILES: CC1=C(C(=NO1)C2=CC=CC=C2)C3=CC=C(C=C3)S(=O)(=O)N\n\nKey features:\n- A nitroso/isoxazoline ring (C=N–O)\n- Two aromatic (ph"
+    },
+    {
+      "smiles": "CC(=O)NC1C(C=C(OC1C(C(CO)O)O)C(=O)O)N=C(N)N",
+      "true_label": 0,
+      "prediction": 0,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared structural features:\n\nThe target molecule (sider_mol_12, SMILES: CC(=O)NC1C(C=C(OC1C(C(CO)O)O)C(=O)O)N=C(N)N) is a highly polar, poly-hydroxylated, partially aromatic/furanoid system w"
+    },
+    {
+      "smiles": "CC1=C(C=C(C=C1)NC(=O)C2=CC=C(C=C2)CN3CCN(CC3)C)NC4=NC=CC(=N4)C5=CN=CC=C5",
+      "true_label": 1,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared Structural Features:\n\nThe target (sider_mol_13: CC1=C(C=C(C=C1)NC(=O)C2=CC=C(C=C2)CN3CCN(CC3)C)NC4=NC=CC(=N4)C5=CN=CC=C5) contains:\n- Multiple aromatic rings (phenyl, pyridine, pyrimid"
+    },
+    {
+      "smiles": "CCC(=O)OCC(=O)C1(C(CC2C1(CC(C3(C2CCC4=CC(=O)C=CC43C)Cl)O)C)C)OC(=O)CC",
+      "true_label": 0,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared Structural Features:\nThe target molecule (sider_mol_14) and the top 5 reference molecules are highly similar, with nearly identical polycyclic steroid-like backbones and extensive este"
+    },
+    {
+      "smiles": "COC1=C(C=C(C=C1)CNC2=NC(=NC=C2C(=O)NCC3=NC=CC=N3)N4CCC[C@H]4CO)Cl",
+      "true_label": 0,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared structural features\n\nExamining the target molecule (sider_mol_15):  \nSMILES: COC1=C(C=C(C=C1)CNC2=NC(=NC=C2C(=O)NCC3=NC=CC=N3)N4CCC[C@H]4CO)Cl\n\nKey features:\n- Methoxy-substituted arom"
+    },
+    {
+      "smiles": "CC(C)C[C@@H](C(=O)N[C@@H](CCCN=C(N)N)C(=O)N1CCC[C@H]1C(=O)NCC(=O)N)NC(=O)[C@@H](CC2=CC3=CC=CC=C3C=C2)NC(=O)[C@H](CC4=CC=C(C=C4)O)NC(=O)[C@H](CO)NC(=O)[C@H](CC5=CNC6=CC=CC=C65)NC(=O)[C@H](CC7=CN=CN7)NC(=O)[C@@H]8CCC(=O)N8",
+      "true_label": 1,
+      "prediction": 0,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared Structural Features\n\nLet’s examine the target and reference molecules for shared structural motifs relevant to hepatobiliary liability:\n\n- The target (\"sider_mol_16\") is a highly pepti"
+    },
+    {
+      "smiles": "C1=CC=C(C=C1)C2=NC3=C(N=C2N)N=C(N=C3N)N",
+      "true_label": 1,
+      "prediction": 0,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared Structural Features\n\nThe target molecule (sider_mol_17, SMILES: C1=CC=C(C=C1)C2=NC3=C(N=C2N)N=C(N=C3N)N) is composed of:\n- A phenyl ring directly attached to a fused purine-like triami"
+    },
+    {
+      "smiles": "C(CN)CNCCSP(=O)(O)O",
+      "true_label": 0,
+      "prediction": 0,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared structural features:\nThe target molecule (C(CN)CNCCSP(=O)(O)O) and the top reference (source_mol_381: NCCCNCCS[P](O)(O)=O) are extremely similar, nearly identical in fact — both featur"
+    },
+    {
+      "smiles": "[Ca+2]",
+      "true_label": 0,
+      "prediction": 0,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared structural features:\nThe target molecule is [Ca+2] (calcium ion). This is an inorganic cation, consisting only of a calcium atom with +2 charge. It contains no carbon frameworks, heter"
+    },
+    {
+      "smiles": "C1C(C(=O)NO1)N",
+      "true_label": 0,
+      "prediction": 0,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared substructures:\nThe target molecule (C1C(C(=O)NO1)N, likely 3-aminomorpholin-2-one or a closely related 5-membered cyclic carbamate with an exocyclic amino group) features a 5-membered "
+    },
+    {
+      "smiles": "COC1=C(C=C2C(=C1)CC(C2=O)CC3CCN(CC3)CC4=CC=CC=C4)OC",
+      "true_label": 1,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared Structural Features\n\nLet’s analyze the target and reference molecules:\n- The target (sider_mol_21): COC1=C(C=C2C(=C1)CC(C2=O)CC3CCN(CC3)CC4=CC=CC=C4)OC\n  - Key fragments: \n      - Dime"
+    },
+    {
+      "smiles": "CCCCC[C@H](CC[C@@H]1[C@H](C[C@@H]2[C@H]1CC3=C(C2)C(=CC=C3)OCC(=O)O)O)O",
+      "true_label": 0,
+      "prediction": 0,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared Structural Features\n\nThe target molecule (sider_mol_22) and the reference molecules all feature:\n- Steroidal backbone: Four fused rings (cyclopentanoperhydrophenanthrene system) typica"
+    },
+    {
+      "smiles": "CCC1=C(CN(C1=O)C(=O)NCCC2=CC=C(C=C2)S(=O)(=O)NC(=O)NC3CCC(CC3)C)C",
+      "true_label": 1,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared structural features:\n- The target molecule (sider_mol_23) contains:\n  - A sulfonamide group: S(=O)(=O)N, attached to an aromatic system.\n  - Nitrogen heterocycles: a substituted piperi"
+    },
+    {
+      "smiles": "CCC1=NC=CC(=C1)C(=S)N",
+      "true_label": 1,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Let's reason through the steps:\n\nStep 1 — Shared Structural Features\n\nTarget: CCC1=NC=CC(=C1)C(=S)N (a thioamide-substituted alkylpyridine)\n  - Key structural motifs: Pyridine aromatic ring (N-heteroc"
+    },
+    {
+      "smiles": "C1CN=C(N1)NC2=C(C3=NC=CN=C3C=C2)Br",
+      "true_label": 0,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Identify shared structural features:\nThe target molecule (sider_mol_25: C1CN=C(N1)NC2=C(C3=NC=CN=C3C=C2)Br) is a fused bicyclic heteroaromatic system with a triazole/pyrimidine-like fused cor"
+    },
+    {
+      "smiles": "CCC1/C=C(/C(C/C=C/C=C(\\C(=O)OC(C/C=C(/C=C(/C1OC2C(C(C(C(O2)(C)C)OC(=O)C(C)C)O)O)\\C)\\C)C(C)O)/COC3C(C(C(C(O3)C)OC(=O)C4=C(C(=C(C(=C4O)Cl)O)Cl)CC)O)OC)O)\\C",
+      "true_label": 1,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared Structural Features\n\nThe target molecule (sider_mol_26) is a complex, highly oxygenated macrolide/polyketide-type structure with the following notable features:\n\n- Many ether and ester"
+    },
+    {
+      "smiles": "O.O.O.O.O.[O-]S(=O)(=S)[O-].[Na+].[Na+]",
+      "true_label": 0,
+      "prediction": 0,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared Structural Features:\nThe target molecule SMILES is O.O.O.O.O.[O-]S(=O)(=S)[O-].[Na+].[Na+], which is sodium dithionate hydrate (multiple waters + sodium dithionate). Key features: a di"
+    },
+    {
+      "smiles": "C(=NC(=N)N)(N)N",
+      "true_label": 0,
+      "prediction": 0,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Let's proceed step by step:\n\nStep 1 — Identify shared structural features:\nThe target SMILES is C(=NC(=N)N)(N)N, which is guanidine (or a guanidino fragment). Its key features:\n- No aromatic ring or l"
+    },
+    {
+      "smiles": "C1CC(C1)CN2CCC34C5C(CCC3(C2CC6=C4C(=C(C=C6)O)O5)O)O",
+      "true_label": 0,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared Structural Features:\nThe target molecule (sider_mol_29: C1CC(C1)CN2CCC34C5C(CCC3(C2CC6=C4C(=C(C=C6)O)O5)O)O) shares multiple key scaffolds with the BBBP reference molecules:\n- Polycycl"
+    },
+    {
+      "smiles": "C[C@@H]1C[C@H]2[C@@H]3C[C@@H](C4=CC(=O)C=C[C@@]4(C3([C@H](C[C@@]2([C@]1(C(=O)COC(=O)C(C)(C)C)O)C)O)F)C)F.C1=CC2=C(C(=C(C=C2Cl)I)O)N=C1",
+      "true_label": 0,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared Structural Features\n\nThe target molecule (sider_mol_30) is a combination (dot-disconnected) of two fragments:\n\nFragment 1 (left, corticosteroid-like): C[C@@H]1C[C@H]2[C@@H]3C[C@@H](C4="
+    },
+    {
+      "smiles": "CCCCCCC(=O)OC1CCC2C1(CCC3C2CCC4=CC(=O)CCC34C)C",
+      "true_label": 1,
+      "prediction": 0,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared structural features:\n- The target molecule (CCCCCCC(=O)OC1CCC2C1(CCC3C2CCC4=CC(=O)CCC34C)C) is a steroid ester: its core is the tetracyclic steroid ring system (cyclopenta[a]phenanthre"
+    },
+    {
+      "smiles": "CCN(CC)C(=O)[C@@]1(C[C@@H]1C[NH3+])C2=CC=CC=C2.[Cl-]",
+      "true_label": 1,
+      "prediction": 0,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Identify shared structural features\n\nTarget molecule: CCN(CC)C(=O)[C@@]1(C[C@@H]1C[NH3+])C2=CC=CC=C2.[Cl-]\n\nKey substructures in the target:\n- Aromatic ring (phenyl group)\n- Tertiary amide (C"
+    },
+    {
+      "smiles": "CC(C)(C)NCC(COC1=CC=CC2=C1CCCC2=O)O",
+      "true_label": 0,
+      "prediction": 0,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Identify shared structural features  \nThe target molecule (CC(C)(C)NCC(COC1=CC=CC2=C1CCCC2=O)O) possesses:\n- A tert-butylaminoethanol motif (alkyl amine with β-hydroxyl group)\n- An ether link"
+    },
+    {
+      "smiles": "CC1=NC(=C(C(=N1)Cl)NC2=NCCN2)OC",
+      "true_label": 0,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared structural features:\n\nLet's parse the target molecule and the main reference (source_mol_397, with highest similarity):\n\nTarget: CC1=NC(=C(C(=N1)Cl)NC2=NCCN2)OC\n\nKey features in target"
+    },
+    {
+      "smiles": "[O-][99Tc](=O)(=O)=O.[Na+]",
+      "true_label": 0,
+      "prediction": 0,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Let's systematically analyze this case:\n\n============================================================\nStep 1 — Shared Structural Features\n============================================================\nT"
+    },
+    {
+      "smiles": "C(CC(C(=O)O)N)CN=C(N)N",
+      "true_label": 0,
+      "prediction": 0,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared Structural Features:\n\n- Target molecule (C(CC(C(=O)O)N)CN=C(N)N) possesses:\n  - A primary amine (-NH2), a carboxylic acid (-COOH), a guanidine moiety (N=C(N)N), and an aliphatic backbo"
+    },
+    {
+      "smiles": "CC(C)[C@@H](CO)N1C=C(C(=O)C2=CC(=C(C=C21)OC)CC3=C(C(=CC=C3)Cl)F)C(=O)O",
+      "true_label": 0,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Identify shared structural features:\nThe target molecule (sider_mol_37) contains:\n- An indole or indolinone core structure (N-heterocycle, fused benzene and pyrrole).\n- A carboxylic acid grou"
+    },
+    {
+      "smiles": "CC(C)C1=NC(=NC(=C1C=C[C@@H](C[C@H](CC(=O)O)O)O)C2=CC=C(C=C2)F)N(C)S(=O)(=O)C",
+      "true_label": 1,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Identify shared structural features:\n\nThe target molecule:\nSMILES: CC(C)C1=NC(=NC(=C1C=C[C@@H](C[C@H](CC(=O)O)O)O)C2=CC=C(C=C2)F)N(C)S(=O)(=O)C\n\nKey features:\n- Aromatic rings (phenyl ring wi"
+    },
+    {
+      "smiles": "CC12CC(C3(C(C1CC(C2(C(=O)CO)O)O)CCC4=CC(=O)C=CC43C)F)O",
+      "true_label": 1,
+      "prediction": 0,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared structural features:\nThe target molecule and the top source references are all complex polycyclic compounds with fused ring systems, characteristic of steroids/corticosteroids. Key sha"
+    },
+    {
+      "smiles": "C1CN(CCN1CCOCCO)C2=NC3=CC=CC=C3SC4=CC=CC=C42",
+      "true_label": 1,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared Structural Features\n\nThe target molecule (sider_mol_40: C1CN(CCN1CCOCCO)C2=NC3=CC=CC=C3SC4=CC=CC=C42) features:\n- A fused tricyclic system with a thiazole (S-containing aromatic ring) "
+    },
+    {
+      "smiles": "CCCCCCCCCCCCCCCCCC(=O)O.CC[C@@H]1[C@@]([C@@H]([C@H](C(=O)[C@@H](C[C@@]([C@@H]([C@H]([C@@H]([C@H](C(=O)O1)C)O[C@H]2C[C@@]([C@H]([C@@H](O2)C)O)(C)OC)C)O[C@H]3[C@@H]([C@H](C[C@H](O3)C)N(C)C)O)(C)O)C)C)O)(C)O",
+      "true_label": 1,
+      "prediction": 0,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared structural features:\nThe target molecule (sider_mol_41) is a very large, highly oxygenated, polycyclic ester with a long aliphatic carboxylic acid side chain. It contains:\n- Several fu"
+    },
+    {
+      "smiles": "CN(C)CC(C1=CC=C(C=C1)OC)C2(CCCCC2)O",
+      "true_label": 1,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Let's carefully walk through the cross-domain reasoning:\n\nStep 1 — Shared structural features\n\nTarget molecule (sider_mol_42): CN(C)CC(C1=CC=C(C=C1)OC)C2(CCCCC2)O\nNotable features:\n- Dimethylamino gro"
+    },
+    {
+      "smiles": "CC(C)(C)C#CC=CCN(C)CC1=CC=CC2=CC=CC=C21",
+      "true_label": 1,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Let's proceed stepwise:\n\nStep 1 — Shared Structural Features\n\nThe target molecule (CC(C)(C)C#CC=CCN(C)CC1=CC=CC2=CC=CC=C21) has:\n- Multiple aromatic rings (biphenyl, fused system)\n- A tertiary amine ("
+    },
+    {
+      "smiles": "C1NC2=CC(=C(C=C2S(=O)(=O)N1)S(=O)(=O)N)Cl.C1(=C(N=C(C(=N1)Cl)N)N)C(=O)N=C(N)N.Cl",
+      "true_label": 1,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared Structural Features\n\nThe target molecule (sider_mol_44) contains several notable structural motifs:\n\n- Multiple sulfonamide (S(=O)(=O)N) groups\n- Aromatic heterocycles (pyrazine rings,"
+    },
+    {
+      "smiles": "C1COCC(=O)N1C2=CC=C(C=C2)N3CC(OC3=O)CNC(=O)C4=CC=C(S4)Cl",
+      "true_label": 1,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Identify shared structural features:\n\nThe target molecule (sider_mol_45) has several notable features:\n- Multiple nitrogen-containing heterocycles (morpholinone ring, piperazinone ring).\n- Ar"
+    },
+    {
+      "smiles": "CC[C@H](C)[C@@H](C(=O)N[C@@H](CCC(=O)O)C(=O)N[C@@H](CCC(=O)O)C(=O)N[C@@H](CO)C(=O)N[C@@H](CCC(=O)N)C(=O)N[C@@H](CC(=O)N)C(=O)N[C@@H](CCC(=O)N)C(=O)N[C@@H](CCC(=O)N)C(=O)N[C@@H](CCC(=O)O)C(=O)N[C@@H](CCCCN)C(=O)N[C@@H](CC(=O)N)C(=O)N[C@@H](CCC(=O)O)C(=O)N[C@@H](CCC(=O)N)C(=O)N[C@@H](CCC(=O)O)C(=O)N[C@@H](CC(C)C)C(=O)N[C@@H](CC(C)C)C(=O)N[C@@H](CCC(=O)O)C(=O)N[C@@H](CC(C)C)C(=O)N[C@@H](CC(=O)O)C(=O)N[C@@H](CCCCN)C(=O)N[C@@H](CC1=CNC2=CC=CC=C21)C(=O)N[C@@H](C)C(=O)N[C@@H](CO)C(=O)N[C@@H](CC(C)C)C(=O)N[C@@H](CC3=CNC4=CC=CC=C43)C(=O)N[C@@H](CC(=O)N)C(=O)N[C@@H](CC5=CNC6=CC=CC=C65)C(=O)N[C@@H](CC7=CC=CC=C7)C(=O)N)NC(=O)[C@H](CC(C)C)NC(=O)[C@H](CO)NC(=O)[C@H](CC8=CN=CN8)NC(=O)[C@H]([C@@H](C)CC)NC(=O)[C@H](CC(C)C)NC(=O)[C@H](CO)NC(=O)[C@H]([C@@H](C)O)NC(=O)[C@H](CC9=CC=C(C=C9)O)NC(=O)C",
+      "true_label": 1,
+      "prediction": 0,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared Structural Features:\n\nThe target molecule (sider_mol_46) is a peptide-like structure, with a long chain of amino acid residues, amide bonds, and several side chains including aromatic "
+    },
+    {
+      "smiles": "CC1(C2C(C3C(C(=O)C(=C(N)[O-])C(=O)C3(C(=O)C2=C(C4=C1C=CC=C4O)O)O)N(C)C)O)O.CC1(C2C(C3C(C(=O)C(=C(N)[O-])C(=O)C3(C(=O)C2=C(C4=C1C=CC=C4O)O)O)N(C)C)O)O.[Ca+2]",
+      "true_label": 0,
+      "prediction": 0,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Shared Structural Features:\n\nExamining the SMILES and reference molecules:\n- All molecules (target and references) are heavily functionalized polycyclic structures with multiple aromatic ring"
+    },
+    {
+      "smiles": "CC(C1=CC=C(C=C1)C(=O)C2=CC=CS2)C(=O)O",
+      "true_label": 0,
+      "prediction": 1,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Let's begin with Step 1 — Identify shared structural features:\n\n**Target molecule SMILES:** CC(C1=CC=C(C=C1)C(=O)C2=CC=CS2)C(=O)O\n\nThis molecule is a propionic acid derivative with:\n- Two aromatic rin"
+    },
+    {
+      "smiles": "CC1=CN=C(C=[N+]1[O-])C(=O)O",
+      "true_label": 0,
+      "prediction": 0,
+      "confidence": 1.0,
+      "retrieved_count": 5,
+      "llm_response": "Step 1 — Identify shared structural features:\n\nTarget molecule: CC1=CN=C(C=[N+]1[O-])C(=O)O\n\n- Core features: Pyridine ring (aromatic, nitrogen heterocycle), N-oxide, carboxylic acid.\n- Notable: Small"
+    }
+  ],
+  "llm_calls": 150
+}
