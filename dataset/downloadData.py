@@ -1,166 +1,208 @@
 """
-Download and prepare real molecular datasets for experiments.
+Download and prepare graph classification datasets for transfer learning experiments.
 
-Uses PyTorch Geometric's MoleculeNet to download Tox21, SIDER, BBBP, etc.
-Exports them to a unified CSV format (smiles, label) for the experiment pipeline.
+Uses PyTorch Geometric's TUDataset to download PROTEINS, DD, COX2, COX2_MD, BZR, BZR_MD.
+These are graph-level classification datasets used for cross-domain transfer learning.
+
+Transfer learning pairs:
+  - PROTEINS <-> DD        (蛋白质结构图)
+  - COX2     <-> COX2_MD   (环氧合酶-2抑制剂)
+  - BZR      <-> BZR_MD    (苯二氮卓受体配体)
 """
 
 import os
 import sys
-import io
-import pandas as pd
 import numpy as np
+import torch
 from pathlib import Path
+from typing import Dict, Tuple, List
 
-from torch_geometric.datasets import MoleculeNet
-from rdkit import Chem
-
-
-def _load_moleculenet(data_dir: str, name: str) -> "MoleculeNet":
-    """Load a MoleculeNet dataset via PyG (downloads if needed)."""
-    raw_root = os.path.join(data_dir, "_raw")
-    return MoleculeNet(root=raw_root, name=name)
+from torch_geometric.datasets import TUDataset
+from torch_geometric.data import Data
 
 
-def _dataset_to_df(dataset, task_index: int = 0) -> pd.DataFrame:
+# ---------------------------------------------------------------------------
+# 数据集元信息
+# ---------------------------------------------------------------------------
+
+DATASET_INFO = {
+    'PROTEINS': {
+        'description': '蛋白质图数据集 — 节点为氨基酸(二级结构元素)，边为相邻关系',
+        'task': '判断蛋白质是否为酶 (enzyme vs non-enzyme)',
+        'num_classes': 2,
+        'transfer_partner': 'DD',
+    },
+    'DD': {
+        'description': '蛋白质图数据集 — 节点为氨基酸，边为空间接触',
+        'task': '判断蛋白质是否为酶 (enzyme vs non-enzyme)',
+        'num_classes': 2,
+        'transfer_partner': 'PROTEINS',
+    },
+    'COX2': {
+        'description': '环氧合酶-2(COX-2)抑制剂活性数据集',
+        'task': '判断分子是否为COX-2活性抑制剂',
+        'num_classes': 2,
+        'transfer_partner': 'COX2_MD',
+    },
+    'COX2_MD': {
+        'description': 'COX-2抑制剂分子动力学描述符数据集',
+        'task': '判断分子是否为COX-2活性抑制剂 (基于MD描述符)',
+        'num_classes': 2,
+        'transfer_partner': 'COX2',
+    },
+    'BZR': {
+        'description': '苯二氮卓受体(BZR)配体活性数据集',
+        'task': '判断分子是否为BZR活性配体',
+        'num_classes': 2,
+        'transfer_partner': 'BZR_MD',
+    },
+    'BZR_MD': {
+        'description': 'BZR配体分子动力学描述符数据集',
+        'task': '判断分子是否为BZR活性配体 (基于MD描述符)',
+        'num_classes': 2,
+        'transfer_partner': 'BZR',
+    },
+}
+
+# 迁移学习实验对
+TRANSFER_PAIRS = [
+    ('PROTEINS', 'DD'),      # P -> D
+    ('DD', 'PROTEINS'),      # D -> P
+    ('COX2', 'COX2_MD'),     # C -> CM
+    ('COX2_MD', 'COX2'),     # CM -> C
+    ('BZR', 'BZR_MD'),       # B -> BM
+    ('BZR_MD', 'BZR'),       # BM -> B
+]
+
+
+def load_tu_dataset(data_dir: str, name: str) -> TUDataset:
     """
-    Convert a PyG MoleculeNet dataset to a DataFrame with (smiles, label).
-    Uses the specified task column; drops rows where the label is NaN.
+    Load a TUDataset by name. Downloads automatically if not present.
+
+    Args:
+        data_dir: root directory for storing datasets
+        name:     dataset name (e.g. 'PROTEINS', 'DD', 'COX2', etc.)
+
+    Returns:
+        TUDataset object
     """
-    rows = []
+    raw_root = os.path.join(data_dir, "_raw_tu")
+    print(f"[TUDataset] Loading {name} from {raw_root} ...")
+    dataset = TUDataset(root=raw_root, name=name, use_node_attr=True)
+    print(f"[TUDataset] {name}: {len(dataset)} graphs, "
+          f"num_node_features={dataset.num_node_features}, "
+          f"num_edge_features={dataset.num_edge_features}, "
+          f"num_classes={dataset.num_classes}")
+    return dataset
+
+
+def get_dataset_stats(dataset: TUDataset, name: str) -> Dict:
+    """Compute basic statistics for a TUDataset."""
+    num_graphs = len(dataset)
+    labels = []
+    num_nodes_list = []
+    num_edges_list = []
+
     for data in dataset:
-        smi = data.smiles if hasattr(data, 'smiles') else None
-        if smi is None:
-            continue
-        # Validate SMILES
-        mol = Chem.MolFromSmiles(smi)
-        if mol is None:
-            continue
+        labels.append(data.y.item())
+        num_nodes_list.append(data.num_nodes)
+        num_edges_list.append(data.num_edges)
 
-        y = data.y.numpy().flatten()
-        # Use the specified task column
-        if task_index < len(y) and not np.isnan(y[task_index]):
-            label = int(y[task_index])
-        else:
-            # Fallback: use first non-NaN label
-            label = None
-            for val in y:
-                if not np.isnan(val):
-                    label = int(val)
-                    break
-            if label is None:
-                continue
+    labels = np.array(labels)
+    unique, counts = np.unique(labels, return_counts=True)
 
-        rows.append({'smiles': smi, 'label': label})
-
-    return pd.DataFrame(rows)
+    stats = {
+        'name': name,
+        'num_graphs': num_graphs,
+        'num_node_features': dataset.num_node_features,
+        'num_edge_features': dataset.num_edge_features,
+        'num_classes': dataset.num_classes,
+        'class_distribution': {int(u): int(c) for u, c in zip(unique, counts)},
+        'avg_nodes': float(np.mean(num_nodes_list)),
+        'avg_edges': float(np.mean(num_edges_list)),
+        'min_nodes': int(np.min(num_nodes_list)),
+        'max_nodes': int(np.max(num_nodes_list)),
+    }
+    return stats
 
 
-def download_tox21(data_dir: str = "data", task_index: int = 2) -> str:
+def ensure_node_features(dataset: TUDataset, name: str) -> int:
     """
-    Download Tox21 dataset. Default task: NR-AhR (index 2).
-    Tox21 has 12 tasks: NR-AR, NR-AR-LBD, NR-AhR, NR-Aromatase, NR-ER,
-    NR-ER-LBD, NR-PPAR-gamma, SR-ARE, SR-ATAD5, SR-HSE, SR-MMP, SR-p53
+    确保数据集有节点特征。如果没有，则使用节点度数作为特征。
 
-    Returns path to saved CSV.
+    某些 TUDataset（如 DD）可能没有节点属性，需要手动添加。
+
+    Returns:
+        实际的节点特征维度
     """
-    output_path = os.path.join(data_dir, "tox21.csv")
-    print(f"[Tox21] Downloading / loading dataset (task_index={task_index}) ...")
-    dataset = _load_moleculenet(data_dir, "Tox21")
-    df = _dataset_to_df(dataset, task_index=task_index)
-    os.makedirs(data_dir, exist_ok=True)
-    df.to_csv(output_path, index=False)
-    pos = int(df['label'].sum())
-    neg = len(df) - pos
-    print(f"[Tox21] Done: {len(df)} molecules (pos={pos}, neg={neg}) -> {output_path}")
-    return output_path
+    if dataset.num_node_features > 0:
+        return dataset.num_node_features
 
+    print(f"[{name}] No node features found. Using degree as node feature ...")
+    max_degree = 0
+    for data in dataset:
+        if data.edge_index.numel() > 0:
+            deg = torch.zeros(data.num_nodes, dtype=torch.long)
+            row = data.edge_index[0]
+            for node_idx in row:
+                deg[node_idx] += 1
+            max_degree = max(max_degree, deg.max().item())
 
-def download_sider(data_dir: str = "data", task_index: int = 0) -> str:
-    """
-    Download SIDER dataset. Default task: first side-effect category.
-    Returns path to saved CSV.
-    """
-    output_path = os.path.join(data_dir, "sider.csv")
-    print(f"[SIDER] Downloading / loading dataset (task_index={task_index}) ...")
-    dataset = _load_moleculenet(data_dir, "SIDER")
-    df = _dataset_to_df(dataset, task_index=task_index)
-    os.makedirs(data_dir, exist_ok=True)
-    df.to_csv(output_path, index=False)
-    pos = int(df['label'].sum())
-    neg = len(df) - pos
-    print(f"[SIDER] Done: {len(df)} molecules (pos={pos}, neg={neg}) -> {output_path}")
-    return output_path
+    # 使用 one-hot 编码度数
+    feat_dim = max_degree + 1
+    for data in dataset:
+        deg = torch.zeros(data.num_nodes, dtype=torch.long)
+        if data.edge_index.numel() > 0:
+            row = data.edge_index[0]
+            for node_idx in row:
+                deg[node_idx] += 1
+        # one-hot 编码
+        x = torch.zeros(data.num_nodes, feat_dim)
+        for i, d in enumerate(deg):
+            if d < feat_dim:
+                x[i, d] = 1.0
+        data.x = x
 
-
-def download_bbbp(data_dir: str = "data") -> str:
-    """
-    Download BBBP (Blood-Brain Barrier Penetration) dataset.
-    Returns path to saved CSV.
-    """
-    output_path = os.path.join(data_dir, "bbbp.csv")
-    print("[BBBP] Downloading / loading dataset ...")
-    dataset = _load_moleculenet(data_dir, "BBBP")
-    df = _dataset_to_df(dataset, task_index=0)
-    os.makedirs(data_dir, exist_ok=True)
-    df.to_csv(output_path, index=False)
-    pos = int(df['label'].sum())
-    neg = len(df) - pos
-    print(f"[BBBP] Done: {len(df)} molecules (pos={pos}, neg={neg}) -> {output_path}")
-    return output_path
-
-
-def create_source_domain(data_dir: str = "data",
-                         source_size: int = 500,
-                         seed: int = 42) -> str:
-    """
-    Create source domain molecules from BBBP for RAG retrieval.
-    BBBP (blood-brain barrier penetration) is used as source domain
-    because it is a DIFFERENT task from the test datasets (Tox21, SIDER),
-    ensuring NO data leakage between source and target domains.
-
-    Returns path to saved CSV.
-    """
-    output_path = os.path.join(data_dir, "source_molecules.csv")
-    bbbp_path = os.path.join(data_dir, "bbbp.csv")
-
-    if not os.path.exists(bbbp_path):
-        download_bbbp(data_dir)
-
-    df = pd.read_csv(bbbp_path)
-    rng = np.random.RandomState(seed)
-    idx = rng.choice(len(df), size=min(source_size, len(df)), replace=False)
-    source_df = df.iloc[idx].reset_index(drop=True)
-    source_df['source_domain'] = 'BBBP'
-    source_df['name'] = [f'source_mol_{i}' for i in range(len(source_df))]
-    source_df['description'] = 'Source domain molecule from BBBP'
-
-    source_df.to_csv(output_path, index=False)
-    print(f"[Source] Done: {len(source_df)} molecules from BBBP -> {output_path}")
-    return output_path
+    print(f"[{name}] Added degree-based features, dim={feat_dim}")
+    return feat_dim
 
 
 def download_all_datasets(data_dir: str = "data"):
-    """Download all datasets required for the experiment."""
+    """Download all datasets required for the transfer learning experiments."""
     os.makedirs(data_dir, exist_ok=True)
     print("=" * 60)
-    print(" Downloading real molecular datasets")
+    print(" Downloading graph classification datasets for transfer learning")
     print("=" * 60)
 
-    download_tox21(data_dir)
-    download_sider(data_dir)
-    download_bbbp(data_dir)
-    create_source_domain(data_dir)
+    all_stats = {}
+    for name in DATASET_INFO:
+        try:
+            dataset = load_tu_dataset(data_dir, name)
+            feat_dim = ensure_node_features(dataset, name)
+            stats = get_dataset_stats(dataset, name)
+            stats['effective_node_features'] = feat_dim
+            all_stats[name] = stats
+        except Exception as e:
+            print(f"[ERROR] Failed to load {name}: {e}")
+            all_stats[name] = {'name': name, 'error': str(e)}
 
     print("\n" + "=" * 60)
-    print("All datasets downloaded successfully!")
+    print(" Dataset Summary")
     print("=" * 60)
+    for name, stats in all_stats.items():
+        if 'error' in stats:
+            print(f"  {name}: FAILED — {stats['error']}")
+        else:
+            print(f"  {name}: {stats['num_graphs']} graphs, "
+                  f"node_feat={stats.get('effective_node_features', stats['num_node_features'])}, "
+                  f"classes={stats['class_distribution']}, "
+                  f"avg_nodes={stats['avg_nodes']:.1f}")
 
-    # Summary
-    print("\nDataset summary:")
-    for csv_file in sorted(Path(data_dir).glob("*.csv")):
-        df = pd.read_csv(csv_file)
-        print(f"  {csv_file.name}: {len(df)} rows, columns={list(df.columns)}")
+    print("\n Transfer Pairs:")
+    for src, tgt in TRANSFER_PAIRS:
+        print(f"  {src} -> {tgt}")
+
+    return all_stats
 
 
 if __name__ == "__main__":
