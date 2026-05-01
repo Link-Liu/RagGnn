@@ -400,7 +400,16 @@ class TransferExperiment:
             {"params": self.llm.projector.parameters(), "lr": lr_proj},
         ], weight_decay=1e-5)
 
-        # ---- 训练 prompt（与推理格式对齐）----
+        # ---- 数据准备 (使用 DataLoader 压榨性能) ----
+        train_set = [tgt_list[i] for i in train_indices]
+        val_set   = [tgt_list[i] for i in val_indices]
+        
+        train_loader = DataLoader(train_set, batch_size=train_batch_size, shuffle=True, 
+                                  num_workers=0, pin_memory=(self.device == 'cuda'))
+        val_loader   = DataLoader(val_set, batch_size=train_batch_size, shuffle=False, 
+                                  num_workers=0, pin_memory=(self.device == 'cuda'))
+
+        # ---- 训练 prompt ----
         graph_token_str = " ".join([GRAPH_TOKEN] * self.num_graph_tokens)
         train_prompt = (
             f"Graph representation: {graph_token_str}\n"
@@ -417,67 +426,54 @@ class TransferExperiment:
         use_amp = self.device == "cuda"
 
         for epoch in range(1, train_epochs + 1):
-            # ---- 训练 ----
+            # ---- 训练阶段 ----
             self.llm.gnn.train()
             self.llm.projector.train()
             optimizer.zero_grad()
 
             epoch_loss, n_steps = 0.0, 0
-            random.shuffle(train_indices)
-
-            for start in range(0, len(train_indices), train_batch_size):
-                batch_idx = train_indices[start: start + train_batch_size]
-                batch_data = [tgt_list[i] for i in batch_idx]
-                B = len(batch_data)
-
-                pyg_batch = PyGBatch.from_data_list(batch_data)
+            for batch in train_loader:
+                batch = batch.to(self.device)
+                B = batch.num_graphs
                 prompts = [train_prompt] * B
-                labels_text = [str(int(d.y.item())) for d in batch_data]
+                labels_text = [str(int(y.item())) for y in batch.y]
 
-                # B2: 使用 autocast 开启混合精度计算
                 with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.bfloat16):
-                    loss = self.llm.compute_loss(pyg_batch, prompts, labels_text)
+                    loss = self.llm.compute_loss(batch, prompts, labels_text)
                     loss = loss / grad_accum_steps
 
                 loss.backward()
-
                 n_steps += 1
                 epoch_loss += loss.item() * grad_accum_steps
 
                 if n_steps % grad_accum_steps == 0:
-                    torch.nn.utils.clip_grad_norm_(
-                        self.llm.trainable_parameters(), 1.0
-                    )
+                    torch.nn.utils.clip_grad_norm_(self.llm.trainable_parameters(), 1.0)
                     optimizer.step()
                     optimizer.zero_grad()
 
             if n_steps % grad_accum_steps != 0:
-                torch.nn.utils.clip_grad_norm_(
-                    self.llm.trainable_parameters(), 1.0
-                )
+                torch.nn.utils.clip_grad_norm_(self.llm.trainable_parameters(), 1.0)
                 optimizer.step()
                 optimizer.zero_grad()
 
             avg_train_loss = epoch_loss / max(n_steps, 1)
 
-            # ---- 验证 ----
+            # ---- 验证阶段 (增加 Autocast) ----
             self.llm.gnn.eval()
             self.llm.projector.eval()
             val_loss, val_steps = 0.0, 0
 
             with torch.no_grad():
-                for start in range(0, len(val_indices), train_batch_size):
-                    batch_idx = val_indices[start: start + train_batch_size]
-                    batch_data = [tgt_list[i] for i in batch_idx]
-                    B = len(batch_data)
-
-                    pyg_batch = PyGBatch.from_data_list(batch_data)
+                for batch in val_loader:
+                    batch = batch.to(self.device)
+                    B = batch.num_graphs
                     prompts = [train_prompt] * B
-                    labels_text = [str(int(d.y.item())) for d in batch_data]
+                    labels_text = [str(int(y.item())) for y in batch.y]
 
-                    loss = self.llm.compute_loss(pyg_batch, prompts, labels_text)
-                    val_loss += loss.item()
-                    val_steps += 1
+                    with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.bfloat16):
+                        loss = self.llm.compute_loss(batch, prompts, labels_text)
+                        val_loss += loss.item()
+                        val_steps += 1
 
             avg_val_loss = val_loss / max(val_steps, 1)
 
@@ -607,10 +603,22 @@ class TransferExperiment:
             print(f"  [{start_pos+1}-{end_pos}/{n_target}] processing batch...", end="", flush=True)
 
             try:
+                # 向量化 GNN 编码整个 Batch
+                pyg_batch = PyGBatch.from_data_list(batch_data).to(self.device)
+                with torch.no_grad():
+                    # 调用 LocalLLMInterface 的编码方法（需要批量支持）
+                    batch_embs = self.llm.gnn(pyg_batch.x.float(), pyg_batch.edge_index, pyg_batch.batch)
+                    batch_embs = batch_embs.cpu().numpy()
+                    # L2 归一化
+                    norms = np.linalg.norm(batch_embs, axis=1, keepdims=True)
+                    batch_embs = np.divide(batch_embs, norms, out=np.zeros_like(batch_embs), where=norms!=0)
+
                 batch_prompts = []
-                for data in batch_data:
+                for i, data in enumerate(batch_data):
                     graph_info = extract_graph_info(data, f"{target_name}_batch", target_name)
-                    emb = _encode_single_graph(self.llm, data, self.device)
+                    emb = batch_embs[i]
+                    
+                    # RAG 检索（仍然是 CPU，但现在 GNN 是批量的）
                     retrieved = retriever.retrieve_similar_graphs(emb, graph_info, k=5)
                     graph_tokens_text = serialize_graph_tokens(emb)
 
@@ -624,8 +632,7 @@ class TransferExperiment:
                     )
                     batch_prompts.append(prompt)
 
-                # 构造 PyG Batch 并推理
-                pyg_batch = PyGBatch.from_data_list(batch_data)
+                # LLM 推理（已经是批量）
                 results = self.llm.predict_batch(pyg_batch, batch_prompts)
 
                 for i, res in enumerate(results):
