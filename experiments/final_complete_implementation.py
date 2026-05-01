@@ -299,7 +299,7 @@ class TransferExperiment:
     }
 
     def __init__(self, data_dir: str = "data", hidden_dim: int = 128,
-                 gnn_epochs: int = 30, gnn_batch_size: int = 32,
+                 gnn_epochs: int = 30, gnn_batch_size: int = 64,
                  llm_path: str = MODELSCOPE_MODEL_ID,
                  modelscope_cache_dir: str = MODELSCOPE_CACHE_DIR,
                  modelscope_revision: str = MODELSCOPE_REVISION,
@@ -351,10 +351,10 @@ class TransferExperiment:
         source_name: str,
         ckpt_proj: str,
         train_epochs: int = 5,
-        train_batch_size: int = 4,
+        train_batch_size: int = 32,
         lr_gnn: float = 1e-4,
         lr_proj: float = 3e-4,
-        grad_accum_steps: int = 4,
+        grad_accum_steps: int = 1, # 4090 显存够大，直接更新
         train_ratio: float = 0.64,
         val_ratio: float = 0.16,
     ) -> List[int]:
@@ -404,10 +404,11 @@ class TransferExperiment:
         train_set = [tgt_list[i] for i in train_indices]
         val_set   = [tgt_list[i] for i in val_indices]
         
+        # 4090 优化：开启 num_workers=4
         train_loader = DataLoader(train_set, batch_size=train_batch_size, shuffle=True, 
-                                  num_workers=0, pin_memory=(self.device == 'cuda'))
+                                  num_workers=4, pin_memory=(self.device == 'cuda'))
         val_loader   = DataLoader(val_set, batch_size=train_batch_size, shuffle=False, 
-                                  num_workers=0, pin_memory=(self.device == 'cuda'))
+                                  num_workers=4, pin_memory=(self.device == 'cuda'))
 
         # ---- 训练 prompt ----
         graph_token_str = " ".join([GRAPH_TOKEN] * self.num_graph_tokens)
@@ -797,7 +798,8 @@ class TransferExperiment:
     # ------------------------------------------------------------------
 
     def run_all_transfers(self, sample_size: int = 50,
-                          pairs: Optional[List[Tuple]] = None) -> Dict:
+                          pairs: Optional[List[Tuple]] = None,
+                          eval_batch_size: int = 8) -> Dict:
         """运行所有迁移学习对。"""
         if pairs is None:
             pairs = self.TRANSFER_PAIRS
@@ -805,14 +807,15 @@ class TransferExperiment:
         for src, tgt in pairs:
             key = f"{src}->{tgt}"
             try:
-                all_results[key] = self.run_transfer(src, tgt, sample_size)
+                all_results[key] = self.run_transfer(src, tgt, sample_size, eval_batch_size)
             except Exception as e:
                 print(f"[ERROR] {key}: {e}")
                 all_results[key] = {'error': str(e), 'status': 'FAILED'}
         return all_results
 
     def run_ablation_suite(self, sample_size: int = 50,
-                           pairs: Optional[List[Tuple]] = None) -> Dict:
+                           pairs: Optional[List[Tuple]] = None,
+                           eval_batch_size: int = 8) -> Dict:
         """运行消融实验套件：每个迁移对同时运行 Full-RAG 和 No-RAG。"""
         if pairs is None:
             pairs = self.TRANSFER_PAIRS
@@ -821,12 +824,12 @@ class TransferExperiment:
             key = f"{src}->{tgt}"
             ablation[key] = {}
             try:
-                ablation[key]['full_rag'] = self.run_transfer(src, tgt, sample_size)
+                ablation[key]['full_rag'] = self.run_transfer(src, tgt, sample_size, eval_batch_size)
             except Exception as e:
                 print(f"[ERROR] Full-RAG {key}: {e}")
                 ablation[key]['full_rag'] = {'error': str(e)}
             try:
-                ablation[key]['no_rag'] = self.run_transfer_no_rag(src, tgt, sample_size)
+                ablation[key]['no_rag'] = self.run_transfer_no_rag(src, tgt, sample_size, eval_batch_size)
             except Exception as e:
                 print(f"[ERROR] No-RAG {key}: {e}")
                 ablation[key]['no_rag'] = {'error': str(e)}
@@ -891,7 +894,7 @@ def main():
         data_dir="data",
         hidden_dim=128,
         gnn_epochs=30,
-        gnn_batch_size=32,
+        gnn_batch_size=256,
         llm_path=MODELSCOPE_MODEL_ID,
         modelscope_cache_dir=MODELSCOPE_CACHE_DIR,
         modelscope_revision=MODELSCOPE_REVISION,
@@ -904,9 +907,10 @@ def main():
     # 运行消融实验
     ablation = experiment.run_ablation_suite(
         sample_size=50,
+        eval_batch_size=64, 
         pairs=[
             ('PROTEINS', 'DD'),
-            ('DD', 'PROTEINS'),
+
             ('COX2', 'COX2_MD'),
             ('COX2_MD', 'COX2'),
             ('BZR', 'BZR_MD'),
