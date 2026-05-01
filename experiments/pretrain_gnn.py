@@ -40,7 +40,16 @@ def pretrain_gnn_standalone(gnn, dataset, device, epochs=30,
         lr=lr, weight_decay=1e-5,
     )
     criterion = nn.BCEWithLogitsLoss()
-    loader = DataLoader(list(dataset), batch_size=batch_size, shuffle=True)
+    
+    # A5: DataLoader 参数调优
+    use_cuda = device.type == 'cuda'
+    loader = DataLoader(
+        list(dataset), 
+        batch_size=batch_size, 
+        shuffle=True,
+        num_workers=0, # Windows 环境下保持 0 避免多进程错误
+        pin_memory=use_cuda
+    )
 
     gnn.train()
     best_loss = float('inf')

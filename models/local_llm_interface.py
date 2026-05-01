@@ -115,13 +115,23 @@ def inject_graph_tokens(
 ) -> torch.Tensor:
     """
     将 input_embeds 中前 num_graph_tokens 个 graph_token_id 位置
-    替换为 soft_tokens，其余位置不变。
+    替换为 soft_tokens，其余位置不变。使用向量化操作优化性能。
+    前提：每条 prompt 中 <graph_token> 数量恒定为 num_graph_tokens。
     """
+    B, L, D = input_embeds.shape
+    
+    # 找到所有 graph_token_id 的位置
+    mask = (input_ids == graph_token_id)
+    # 获取索引并调整形状为 [B, num_graph_tokens]
+    batch_idx, pos_idx = torch.where(mask)
+    
+    # 只有当每个样本的 token 数量确实恒定时，才能直接 view
+    batch_idx = batch_idx.view(B, num_graph_tokens)
+    pos_idx = pos_idx.view(B, num_graph_tokens)
+
     out = input_embeds.clone()
-    for b in range(input_embeds.size(0)):
-        positions = (input_ids[b] == graph_token_id).nonzero(as_tuple=True)[0]
-        for k, pos in enumerate(positions[:num_graph_tokens]):
-            out[b, pos, :] = soft_tokens[b, k, :]
+    # 使用高级索引进行一次性写入
+    out[batch_idx, pos_idx] = soft_tokens
     return out
 
 
@@ -152,6 +162,10 @@ class LocalLLMInterface:
         self.num_graph_tokens = num_graph_tokens
         self.max_new_tokens = max_new_tokens
         self.call_count = 0
+        
+        # 缓存 (A2, A3)
+        self._prompt_cache = {}
+        self._label_cache = {}
 
         # ---- 设备 ----
         if device == "auto":
@@ -286,13 +300,20 @@ class LocalLLMInterface:
         graph_emb = self._encode_graph(pyg_batch)          # [B, hidden]
         soft_tokens = self._get_soft_tokens(graph_emb)     # [B, num_tok, llm_dim]
 
-        # 2. Tokenize 提示词
-        enc = self.tokenizer(
-            prompts, return_tensors="pt", padding=True,
-            truncation=True, max_length=512,
-        )
-        input_ids = enc["input_ids"].to(self.device)
-        attention_mask = enc["attention_mask"].to(self.device)
+        # 2. Tokenize 提示词 (A2: 缓存优化)
+        # 简单起见，这里用 prompt 列表的第一个元素作为 key（假设 batch 内 prompt 相同）
+        # 如果 batch 内不同，可以用 tuple(prompts) 作为 key
+        cache_key = tuple(prompts)
+        if cache_key not in self._prompt_cache:
+            enc = self.tokenizer(
+                prompts, return_tensors="pt", padding=True,
+                truncation=True, max_length=512,
+            )
+            self._prompt_cache[cache_key] = {k: v.to(self.device) for k, v in enc.items()}
+        
+        enc = self._prompt_cache[cache_key]
+        input_ids = enc["input_ids"]
+        attention_mask = enc["attention_mask"]
 
         # 3. 获取词嵌入并注入 soft tokens
         embed_fn = self.llm.get_input_embeddings()
@@ -302,13 +323,20 @@ class LocalLLMInterface:
             input_ids, self.graph_token_id, self.num_graph_tokens,
         )
 
-        # 4. Tokenize 标签（不加 special tokens）
-        label_enc = self.tokenizer(
-            labels_text, return_tensors="pt", padding=True,
-            add_special_tokens=False,
-        )
-        label_ids = label_enc["input_ids"].to(self.device)
-        label_mask = label_enc["attention_mask"].to(self.device)
+        # 4. Tokenize 标签 (A3: 缓存优化)
+        # 预先 Tokenize 核心标签 "0" 和 "1"
+        if "0" not in self._label_cache:
+            for l_str in ["0", "1"]:
+                l_enc = self.tokenizer(
+                    l_str, return_tensors="pt", add_special_tokens=False
+                )
+                self._label_cache[l_str] = l_enc["input_ids"].to(self.device)
+                # 记录 mask（全 1，因为标签通常是一个 token）
+                self._label_cache[l_str + "_mask"] = l_enc["attention_mask"].to(self.device)
+
+        # 构造 batch 的 label_ids 和 label_mask
+        label_ids = torch.cat([self._label_cache[l] for l in labels_text], dim=0)
+        label_mask = torch.cat([self._label_cache[l + "_mask"] for l in labels_text], dim=0)
         label_embeds = embed_fn(label_ids)
 
         # 5. 拼接 prompt + label
@@ -369,34 +397,39 @@ class LocalLLMInterface:
         return self.tokenizer.batch_decode(out_ids, skip_special_tokens=True)
 
     # ----------------------------------------------------------
-    # predict（统一预测输出格式）
+    # predict（支持 batch）
     # ----------------------------------------------------------
     @torch.no_grad()
+    def predict_batch(self, pyg_batch, prompts: List[str]) -> List[Dict]:
+        """
+        批量推理，返回结果字典列表。
+        """
+        self.call_count += len(prompts)
+        results = self.generate(pyg_batch, prompts)
+        
+        batch_results = []
+        for content in results:
+            content = content.strip()
+            # 解析 "Answer: 0/1"
+            match = re.search(r'Answer\s*:\s*([01])', content, re.IGNORECASE)
+            if match is None:
+                digits = re.findall(r'[01]', content[-20:])
+                prediction = int(digits[-1]) if digits else 0
+            else:
+                prediction = int(match.group(1))
+            
+            batch_results.append({
+                'prediction': prediction,
+                'confidence': 1.0,
+                'response': content,
+                'tokens_used': 0,
+            })
+        return batch_results
+
+    @torch.no_grad()
     def predict(self, pyg_batch, prompt: str) -> Dict:
-        """
-        单图推理，返回统一格式字典：
-            {'prediction': int, 'confidence': float, 'response': str, ...}
-        """
-        self.call_count += 1
-        results = self.generate(pyg_batch, [prompt])
-        content = results[0].strip()
-
-        # 解析 "Answer: 0/1"
-        match = re.search(r'Answer\s*:\s*([01])', content, re.IGNORECASE)
-        if match is None:
-            # fallback：在生成文本末尾找第一个 0 或 1
-            digits = re.findall(r'[01]', content[-20:])
-            prediction = int(digits[-1]) if digits else 0
-        else:
-            prediction = int(match.group(1))
-
-        return {
-            'prediction': prediction,
-            'confidence': 1.0,
-            'response': content,
-            'tokens_used': 0,
-            'api_call_id': f'call_{self.call_count}',
-        }
+        """单图推理（封装 predict_batch）"""
+        return self.predict_batch(pyg_batch, [prompt])[0]
 
     # ----------------------------------------------------------
     # check_status（兼容旧接口）

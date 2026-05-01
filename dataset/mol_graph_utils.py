@@ -199,9 +199,18 @@ def split_dataset(dataset: TUDataset,
 
 def create_dataloader(data_list: List[Data],
                       batch_size: int = 32,
-                      shuffle: bool = True) -> DataLoader:
+                      shuffle: bool = False,
+                      num_workers: int = 0,
+                      pin_memory: bool = True) -> DataLoader:
     """创建 PyG DataLoader。"""
-    return DataLoader(data_list, batch_size=batch_size, shuffle=shuffle)
+    return DataLoader(
+        data_list, 
+        batch_size=batch_size, 
+        shuffle=shuffle,
+        num_workers=num_workers,
+        pin_memory=pin_memory
+    )
+
 
 
 def dataset_summary(dataset: TUDataset, name: str = "") -> Dict:
