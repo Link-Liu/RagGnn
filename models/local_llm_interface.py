@@ -228,19 +228,29 @@ class LocalLLMInterface:
         self.graph_token_id = self.tokenizer.convert_tokens_to_ids(GRAPH_TOKEN)
 
         # ---- LLM ----
-        print(f"[LLM] Loading model from: {self.model_dir}")
+        print(f"[LLM] Loading model from: {self.model_dir} to {self.device}")
         load_kwargs = dict(
             torch_dtype=torch.bfloat16,
             trust_remote_code=True,
         )
         if load_in_8bit:
             load_kwargs["load_in_8bit"] = True
+            load_kwargs["device_map"] = {"": self.device.index if self.device.index is not None else 0}
         else:
-            load_kwargs["device_map"] = "auto"
+            # 显式指定显卡，防止 accelerate 误判到 CPU
+            load_kwargs["device_map"] = {"": self.device.index if self.device.index is not None else 0}
 
         self.llm = ModelScopeAutoModelForCausalLM.from_pretrained(
             self.model_dir, **load_kwargs
         )
+        
+        # 确认位置
+        actual_device = next(self.llm.parameters()).device
+        print(f"[LLM] Model actually loaded on: {actual_device}")
+        if actual_device.type == 'cpu' and self.device.type == 'cuda':
+            print("[LLM] WARNING: Model is on CPU but CUDA is requested! Attempting force move...")
+            self.llm = self.llm.to(self.device)
+
         # 扩展 embedding 层（因为新增了 <graph_token>）
         if not hasattr(self.llm, "resize_token_embeddings"):
             raise RuntimeError("Loaded ModelScope model does not support token embedding resize.")
