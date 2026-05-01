@@ -115,23 +115,42 @@ def inject_graph_tokens(
 ) -> torch.Tensor:
     """
     将 input_embeds 中前 num_graph_tokens 个 graph_token_id 位置
-    替换为 soft_tokens，其余位置不变。使用向量化操作优化性能。
-    前提：每条 prompt 中 <graph_token> 数量恒定为 num_graph_tokens。
+    替换为 soft_tokens。
     """
     B, L, D = input_embeds.shape
     
     # 找到所有 graph_token_id 的位置
     mask = (input_ids == graph_token_id)
-    # 获取索引并调整形状为 [B, num_graph_tokens]
+    num_found = mask.sum().item()
+    
+    # 如果根本没找到占位符（例如在消融实验 No-RAG 模式下），直接返回原 embedding
+    if num_found == 0:
+        return input_embeds
+
+    # 获取索引
     batch_idx, pos_idx = torch.where(mask)
     
-    # 只有当每个样本的 token 数量确实恒定时，才能直接 view
+    # 安全检查：如果找到的数量不是预期的 B * num_graph_tokens，
+    # 说明某些 prompt 占位符不对，回退到循环处理以保证健壮性
+    if num_found != B * num_graph_tokens:
+        out = input_embeds.clone()
+        # 确保类型一致
+        soft_tokens = soft_tokens.to(out.dtype)
+        for b in range(B):
+            b_mask = (input_ids[b] == graph_token_id)
+            b_pos = b_mask.nonzero(as_tuple=True)[0]
+            # 取前 num_graph_tokens 个进行替换
+            for k, pos in enumerate(b_pos[:num_graph_tokens]):
+                out[b, pos, :] = soft_tokens[b, k, :]
+        return out
+
+    # 理想情况：使用向量化加速
     batch_idx = batch_idx.view(B, num_graph_tokens)
     pos_idx = pos_idx.view(B, num_graph_tokens)
 
     out = input_embeds.clone()
-    # 使用高级索引进行一次性写入
-    out[batch_idx, pos_idx] = soft_tokens
+    # 核心修复：确保赋值时类型一致 (BFloat16 vs Float32)
+    out[batch_idx, pos_idx] = soft_tokens.to(out.dtype)
     return out
 
 
