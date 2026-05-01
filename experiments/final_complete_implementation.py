@@ -522,8 +522,70 @@ class TransferExperiment:
         print(f"  Transfer: {source_name} -> {target_name}  (sample={sample_size}, batch={eval_batch_size})")
         print(f"{'='*60}")
 
-        # ... (前部加载逻辑不变) ...
-        # [由于篇幅原因，我将直接定位到推理循环部分进行替换]
+        # 1. 加载数据
+        src_list, tgt_list, unified_dim, edge_dim = self._load_and_prepare(source_name, target_name)
+        ckpt_gnn  = f"checkpoints/gnn_{source_name.lower()}.pt"
+        ckpt_proj = f"checkpoints/proj_{source_name.lower()}_{target_name.lower()}.pt"
+
+        # 2. 延迟初始化 LocalLLMInterface（首次运行才加载 LLM）
+        if self.llm is None or self.llm.gnn.convs[0].nn[0].in_features != unified_dim:
+            print(f"[LLM] Initializing LocalLLMInterface (node_feat={unified_dim}) ...")
+            self.llm = LocalLLMInterface(
+                model_name_or_path=self._llm_path,
+                num_node_features=unified_dim,
+                gnn_hidden_dim=self.hidden_dim,
+                num_graph_tokens=self.num_graph_tokens,
+                load_in_8bit=self._load_in_8bit,
+                modelscope_cache_dir=self._ms_cache_dir,
+                modelscope_revision=self._ms_revision,
+            )
+
+        # 3. GNN 预训练 / 加载
+        if not self.llm.load_checkpoint(ckpt_proj):
+            # 先用源域数据有监督预训练 GNN
+            from experiments.pretrain_gnn import pretrain_gnn_standalone
+            pretrain_gnn_standalone(
+                self.llm.gnn, src_list, device=self.device,
+                epochs=self.gnn_epochs, batch_size=self.gnn_batch_size,
+                ckpt=ckpt_gnn,
+            )
+
+        # 4. ========== 联合训练 GNN + Projector（通过冻结 LLM 的 CE loss）==========
+        #    返回 test_indices（从未参与训练/验证的样本，用于评估）
+        if not Path(ckpt_proj).exists():
+            test_indices = self._joint_train(
+                tgt_list, target_name, source_name, ckpt_proj
+            )
+        else:
+            # 从已保存的 checkpoint 恢复 test_indices
+            ckpt_data = torch.load(ckpt_proj, map_location='cpu')
+            test_indices = ckpt_data.get('test_indices', None)
+            if test_indices is None:
+                # 兼容旧 checkpoint：用相同 seed 重新划分
+                import random
+                indices = list(range(len(tgt_list)))
+                random.seed(42)
+                random.shuffle(indices)
+                n_train = int(0.64 * len(indices))
+                n_val   = int(0.16 * len(indices))
+                test_indices = indices[n_train + n_val:]
+                print(f"[WARN] test_indices not in checkpoint, re-derived {len(test_indices)} test samples")
+
+        print(f"[Eval] Test set: {len(test_indices)} graphs (never seen during training)")
+
+        # 5. 编码源域 → 构建 RAG 索引
+        print(f"[RAG] Encoding {len(src_list)} source graphs ...")
+        src_embs, src_labels = _encode_dataset_with_llm(self.llm, src_list, self.device)
+        src_infos = []
+        for i, (data, emb) in enumerate(zip(src_list, src_embs)):
+            info = extract_graph_info(data, f"{source_name}_{i}", source_name)
+            info['source_domain'] = source_name.lower()
+            info['graph_tokens_text'] = serialize_graph_tokens(emb)
+            src_infos.append(info)
+
+        retriever = GraphRetriever(embedding_dim=self.hidden_dim)
+        retriever.add_source_graphs(src_embs, src_infos, src_labels)
+        print(f"[RAG] Indexed {len(src_embs)} source graphs")
 
         # 6. 仅在 test_indices（held-out）上评估
         n_target = len(test_indices)
