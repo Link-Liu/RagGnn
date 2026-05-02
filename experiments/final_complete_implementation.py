@@ -352,11 +352,11 @@ class TransferExperiment:
         target_name: str,
         source_name: str,
         ckpt_proj: str,
-        train_epochs: int = 5,
-        train_batch_size: int = 32,
-        lr_gnn: float = 1e-4,
-        lr_proj: float = 3e-4,
-        grad_accum_steps: int = 1, # 4090 显存够大，直接更新
+        train_epochs: int = 15,
+        train_batch_size: int = 16,
+        lr_gnn: float = 5e-5,
+        lr_proj: float = 2e-4,
+        grad_accum_steps: int = 2,
         train_ratio: float = 0.64,
         val_ratio: float = 0.16,
     ) -> List[int]:
@@ -456,8 +456,20 @@ class TransferExperiment:
             {"params": self.llm.projector.parameters(), "lr": lr_proj},
         ], weight_decay=1e-5)
 
+        # ---- 学习率调度器（Cosine Annealing + Warmup）----
+        total_steps = train_epochs * max(len(train_loader), 1)
+        warmup_steps = max(total_steps // 5, 1)
+        def lr_lambda(step):
+            if step < warmup_steps:
+                return float(step) / float(max(warmup_steps, 1))
+            progress = float(step - warmup_steps) / float(max(total_steps - warmup_steps, 1))
+            return max(0.1, 0.5 * (1.0 + np.cos(np.pi * progress)))
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
         best_val_loss = float("inf")
         best_state = None
+        patience_counter = 0
+        patience_limit = 5  # Early stopping patience
         use_amp = self.device == "cuda"
         graph_token_placeholder = " ".join([GRAPH_TOKEN] * self.num_graph_tokens)
 
@@ -495,10 +507,12 @@ class TransferExperiment:
                 if n_steps % grad_accum_steps == 0:
                     torch.nn.utils.clip_grad_norm_(self.llm.trainable_parameters(), 1.0)
                     optimizer.step()
+                    scheduler.step()
                     optimizer.zero_grad()
 
             if n_steps % grad_accum_steps != 0:
                 optimizer.step()
+                scheduler.step()
                 optimizer.zero_grad()
             avg_train_loss = epoch_loss / max(n_steps, 1)
 
@@ -534,13 +548,18 @@ class TransferExperiment:
 
             if avg_val_loss < best_val_loss:
                 best_val_loss = avg_val_loss
+                patience_counter = 0
                 best_state = {
                     "gnn": {k: v.cpu().clone() for k, v in self.llm.gnn.state_dict().items()},
                     "projector": {k: v.cpu().clone() for k, v in self.llm.projector.state_dict().items()},
                 }
                 print(f"  ← best ✓")
             else:
-                print()
+                patience_counter += 1
+                print(f"  (patience {patience_counter}/{patience_limit})")
+                if patience_counter >= patience_limit:
+                    print(f"  [Early Stopping] No improvement for {patience_limit} epochs, stopping.")
+                    break
 
         # ---- 恢复最佳权重并保存 ----
         if best_state:
@@ -552,22 +571,6 @@ class TransferExperiment:
             best_state["test_indices"] = test_indices
             torch.save(best_state, ckpt_proj)
             print(f"  [Joint Train] Best checkpoint saved -> {ckpt_proj} (val_loss={best_val_loss:.4f})")
-
-        self.llm.gnn.eval()
-        self.llm.projector.eval()
-        return test_indices
-        if best_state:
-            self.llm.gnn.load_state_dict(best_state["gnn"])
-            self.llm.projector.load_state_dict(best_state["projector"])
-            self.llm.gnn.to(self.device)
-            self.llm.projector.to(self.device)
-
-            Path(ckpt_proj).parent.mkdir(parents=True, exist_ok=True)
-            # 同时保存 test_indices 以便复现
-            best_state["test_indices"] = test_indices
-            torch.save(best_state, ckpt_proj)
-            print(f"  [Joint Train] Best checkpoint saved -> {ckpt_proj} "
-                  f"(val_loss={best_val_loss:.4f})")
 
         self.llm.gnn.eval()
         self.llm.projector.eval()
@@ -589,6 +592,11 @@ class TransferExperiment:
 
         # 2. 延迟初始化 LocalLLMInterface（首次运行才加载 LLM）
         if self.llm is None or self.llm.gnn.convs[0].nn[0].in_features != unified_dim:
+            # 显式释放旧 LLM 的 GPU 显存，防止 CUDA OOM
+            if self.llm is not None:
+                print(f"[LLM] Feature dim changed, releasing old LLM ...")
+                self.llm.release()
+                self.llm = None
             print(f"[LLM] Initializing LocalLLMInterface (node_feat={unified_dim}) ...")
             self.llm = LocalLLMInterface(
                 model_name_or_path=self._llm_path,
@@ -743,6 +751,11 @@ class TransferExperiment:
 
         # No-RAG 也需要 LLM（用于 soft token 推理），若尚未初始化则在此完成
         if self.llm is None or self.llm.gnn.convs[0].nn[0].in_features != unified_dim:
+            # 显式释放旧 LLM 的 GPU 显存，防止 CUDA OOM
+            if self.llm is not None:
+                print(f"[LLM] Feature dim changed, releasing old LLM ...")
+                self.llm.release()
+                self.llm = None
             print(f"[LLM] Initializing LocalLLMInterface for No-RAG "
                   f"(node_feat={unified_dim}) ...")
             self.llm = LocalLLMInterface(
@@ -751,6 +764,8 @@ class TransferExperiment:
                 gnn_hidden_dim=self.hidden_dim,
                 num_graph_tokens=self.num_graph_tokens,
                 load_in_8bit=self._load_in_8bit,
+                modelscope_cache_dir=self._ms_cache_dir,
+                modelscope_revision=self._ms_revision,
             )
             # 尝试加载已有联合训练 checkpoint
             ckpt_proj = f"checkpoints/proj_{source_name.lower()}_{target_name.lower()}.pt"
@@ -880,6 +895,7 @@ class TransferExperiment:
                            pairs: Optional[List[Tuple]] = None,
                            eval_batch_size: int = 8) -> Dict:
         """运行消融实验套件：每个迁移对同时运行 Full-RAG 和 No-RAG。"""
+        import gc
         if pairs is None:
             pairs = self.TRANSFER_PAIRS
         ablation = {}
@@ -896,6 +912,15 @@ class TransferExperiment:
             except Exception as e:
                 print(f"[ERROR] No-RAG {key}: {e}")
                 ablation[key]['no_rag'] = {'error': str(e)}
+
+            # 每对实验结束后清理 GPU 缓存，防止累积导致 OOM
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                mem_alloc = torch.cuda.memory_allocated() / 1024**3
+                mem_reserved = torch.cuda.memory_reserved() / 1024**3
+                print(f"[GPU] After {key}: allocated={mem_alloc:.1f}GB, reserved={mem_reserved:.1f}GB")
+
         return ablation
 
     def save_results(self, results: Dict, output_dir: str = "real_experiment_results"):
@@ -956,8 +981,8 @@ def main():
     experiment = TransferExperiment(
         data_dir="data",
         hidden_dim=128,
-        gnn_epochs=30,
-        gnn_batch_size=256,
+        gnn_epochs=50,
+        gnn_batch_size=128,
         llm_path=MODELSCOPE_MODEL_ID,
         modelscope_cache_dir=MODELSCOPE_CACHE_DIR,
         modelscope_revision=MODELSCOPE_REVISION,
@@ -970,7 +995,7 @@ def main():
     # 运行消融实验
     ablation = experiment.run_ablation_suite(
         sample_size=200,
-        eval_batch_size=64, 
+        eval_batch_size=8,
         pairs=[
             ('PROTEINS', 'DD'),
             ('DD', 'PROTEINS'),

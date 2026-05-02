@@ -182,8 +182,7 @@ class LocalLLMInterface:
         self.max_new_tokens = max_new_tokens
         self.call_count = 0
         
-        # 缓存 (A2, A3)
-        self._prompt_cache = {}
+        # 标签 token 缓存（只缓存 "0" 和 "1" 两个固定标签）
         self._label_cache = {}
 
         # ---- 设备 ----
@@ -329,20 +328,14 @@ class LocalLLMInterface:
         graph_emb = self._encode_graph(pyg_batch)          # [B, hidden]
         soft_tokens = self._get_soft_tokens(graph_emb)     # [B, num_tok, llm_dim]
 
-        # 2. Tokenize 提示词 (A2: 缓存优化)
-        # 简单起见，这里用 prompt 列表的第一个元素作为 key（假设 batch 内 prompt 相同）
-        # 如果 batch 内不同，可以用 tuple(prompts) 作为 key
-        cache_key = tuple(prompts)
-        if cache_key not in self._prompt_cache:
-            enc = self.tokenizer(
-                prompts, return_tensors="pt", padding=True,
-                truncation=True, max_length=512,
-            )
-            self._prompt_cache[cache_key] = {k: v.to(self.device) for k, v in enc.items()}
-        
-        enc = self._prompt_cache[cache_key]
-        input_ids = enc["input_ids"]
-        attention_mask = enc["attention_mask"]
+        # 2. Tokenize 提示词（每次重新 tokenize，不缓存 — 每个 batch 的 prompt 不同，
+        #    缓存只会导致 GPU 显存无限增长而永远不命中）
+        enc = self.tokenizer(
+            prompts, return_tensors="pt", padding=True,
+            truncation=True, max_length=512,
+        )
+        input_ids = enc["input_ids"].to(self.device)
+        attention_mask = enc["attention_mask"].to(self.device)
 
         # 3. 获取词嵌入并注入 soft tokens
         embed_fn = self.llm.get_input_embeddings()
@@ -441,15 +434,35 @@ class LocalLLMInterface:
             content = content.strip()
             # 解析 "Answer: 0/1"
             match = re.search(r'Answer\s*:\s*([01])', content, re.IGNORECASE)
-            if match is None:
-                digits = re.findall(r'[01]', content[-20:])
-                prediction = int(digits[-1]) if digits else 0
-            else:
+            if match is not None:
                 prediction = int(match.group(1))
+                confidence = 1.0
+            else:
+                # 回退策略：搜索最后出现的 0 或 1
+                digits = re.findall(r'[01]', content[-50:])
+                if digits:
+                    prediction = int(digits[-1])
+                    confidence = 0.5
+                    print(f"  [WARN] No 'Answer: X' found, fallback to last digit -> {prediction}  (response: {content[-60:]!r})")
+                else:
+                    # 最终回退：搜索整个文本中 '1' 和 '0' 出现次数
+                    cnt_0 = content.lower().count('label 0') + content.lower().count('class 0')
+                    cnt_1 = content.lower().count('label 1') + content.lower().count('class 1')
+                    if cnt_1 > cnt_0:
+                        prediction = 1
+                        print(f"  [WARN] No digit found, inferred label=1 from keyword counts (label_1={cnt_1}, label_0={cnt_0})")
+                    elif cnt_0 > cnt_1:
+                        prediction = 0
+                        print(f"  [WARN] No digit found, inferred label=0 from keyword counts (label_0={cnt_0}, label_1={cnt_1})")
+                    else:
+                        # 真的无法判断时，用随机预测避免系统性偏向 majority class
+                        prediction = np.random.randint(0, 2)
+                        print(f"  [WARN] Cannot determine label, random fallback -> {prediction}  (response: {content[:80]!r})")
+                    confidence = 0.1
             
             batch_results.append({
                 'prediction': prediction,
-                'confidence': 1.0,
+                'confidence': confidence,
                 'response': content,
                 'tokens_used': 0,
             })
@@ -459,6 +472,30 @@ class LocalLLMInterface:
     def predict(self, pyg_batch, prompt: str) -> Dict:
         """单图推理（封装 predict_batch）"""
         return self.predict_batch(pyg_batch, [prompt])[0]
+
+    # ----------------------------------------------------------
+    # 资源释放（防止 CUDA OOM）
+    # ----------------------------------------------------------
+    def release(self):
+        """显式释放 GPU 显存。在重新创建 LLM 前调用。"""
+        import gc
+        if hasattr(self, 'llm') and self.llm is not None:
+            self.llm.cpu()
+            del self.llm
+            self.llm = None
+        if hasattr(self, 'gnn') and self.gnn is not None:
+            self.gnn.cpu()
+            del self.gnn
+            self.gnn = None
+        if hasattr(self, 'projector') and self.projector is not None:
+            self.projector.cpu()
+            del self.projector
+            self.projector = None
+        self._label_cache.clear()
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        print("[LLM] GPU memory released.")
 
     # ----------------------------------------------------------
     # check_status（兼容旧接口）

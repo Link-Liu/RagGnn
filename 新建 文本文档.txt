@@ -1,0 +1,284 @@
+lcy) PS D:\LCY\RagGnn> & C:/Users/DELL/anaconda3/envs/lcy/python.exe d:/LCY/RagGnn/experiments/final_complete_implementation.py
+============================================================
+  Domain-Aware RAG-MDA — Graph Transfer Learning + Ablation
+  LLM Backend: ModelScope (frozen, soft graph token injection)
+============================================================
+[Init] device=cuda, llm=LLM-Research/Meta-Llama-3.1-8B
+
+============================================================
+  Transfer: PROTEINS -> DD  (sample=200, batch=64)
+============================================================
+[Feature] Unifying dims: PROTEINS=4, DD=89 -> 89
+[Feature] Padding PROTEINS with 85 zeros
+[LLM] Initializing LocalLLMInterface (node_feat=89) ...
+[LLM] Downloading from ModelScope: LLM-Research/Meta-Llama-3.1-8B (cache_dir=D:\LCY\RagGnn\checkpoints\modelscope, revision=master)
+Downloading Model from https://www.modelscope.cn to directory: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B
+2026-05-02 10:54:37,663 - modelscope - INFO - Creating symbolic link [D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B].
+2026-05-02 10:54:37,663 - modelscope - WARNING - Failed to create symbolic link D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B for D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B.
+[LLM] Loading tokenizer from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B
+[LLM] Loading model from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B to cuda
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 291/291 [00:05<00:00, 55.84it/s]
+[LLM] Model actually loaded on: cuda:0
+[transformers] The new embeddings will be initialized from a multivariate normal distribution that has old embeddings' mean and covariance. As described in this article: https://nlp.stanford.edu/~johnhew/vocab-expansion.html. To disable this, use `mean_resizing=False`
+[transformers] The new lm_head weights will be initialized from a multivariate normal distribution that has old embeddings' mean and covariance. As described in this article: https://nlp.stanford.edu/~johnhew/vocab-expansion.html. To disable this, use `mean_resizing=False`
+[LLM] All LLM parameters FROZEN.
+[GNN] node_feat=89, hidden=128, layers=4, graph_tokens=8
+[Params] Trainable (GNN+Proj): 269,653,120 | Frozen (LLM): 8,030,269,440 | Ratio: 3.249%
+[Checkpoint] Loaded <- checkpoints/proj_proteins_dd.pt
+[Eval] Test set: 237 graphs (never seen during training)
+[RAG] Encoding 1113 source graphs ...
+[RAG] Indexed 1113 source graphs
+  [1-64/237] processing batch...[transformers] Ignoring clean_up_tokenization_spaces=True for BPE tokenizer TokenizersBackend. The clean_up_tokenization post-processing step is designed for WordPiece tokenizers and is destructive for BPE (it strips spaces before punctuation). Set clean_up_tokenization_spaces=False to suppress this warning, or set clean_up_tokenization_spaces_for_bpe_even_though_it_will_corrupt_output=True to force cleanup anyway.
+ done.
+  [65-128/237] processing batch... done.
+  [129-192/237] processing batch... done.
+  [193-237/237] processing batch... done.
+
+[Results] PROTEINS->DD:
+  Accuracy : 0.5654  (134/237)
+  F1       : 0.1043
+  Precision: 0.2857
+  Recall   : 0.0638
+  AUC      : 0.4795
+  Failed   : 0
+
+============================================================
+  [No-RAG] PROTEINS -> DD  (sample=200, batch=64)
+============================================================
+[Feature] Unifying dims: PROTEINS=4, DD=89 -> 89
+[Feature] Padding PROTEINS with 85 zeros
+  [1-64/200] processing batch... done.
+  [65-128/200] processing batch... done.
+  [129-192/200] processing batch... done.
+  [193-200/200] processing batch... done.
+
+[Results] [No-RAG] PROTEINS->DD:
+  Accuracy : 0.6100  (122/200)
+  F1       : 0.0000
+  Precision: 0.0000
+  Recall   : 0.0000
+  AUC      : 0.5000
+  Failed   : 0
+
+============================================================
+  Transfer: DD -> PROTEINS  (sample=200, batch=64)
+============================================================
+[Feature] Unifying dims: DD=89, PROTEINS=4 -> 89
+[Feature] Padding PROTEINS with 85 zeros
+[GNN-Pretrain] Loaded from checkpoints/gnn_dd.pt
+
+============================================================
+  [Joint Train] GNN + Projector (RAG-Augmented) (DD -> PROTEINS)
+  Train epochs=5, lr_gnn=0.0001, lr_proj=0.0003
+============================================================
+  Train: 712, Val: 178, Test: 223 (held-out for evaluation)
+  [RAG-Setup] Building temporary retrieval index from DD ...
+  [RAG-Setup] Pre-retrieving for 712 samples ...
+  [RAG-Setup] Pre-retrieving for 178 samples ...
+[ERROR] Full-RAG DD->PROTEINS: CUDA error: out of memory
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+============================================================
+  [No-RAG] DD -> PROTEINS  (sample=200, batch=64)
+============================================================
+[Feature] Unifying dims: DD=89, PROTEINS=4 -> 89
+[Feature] Padding PROTEINS with 85 zeros
+  [1-64/200] processing batch...  ERROR in batch: CUDA error: out of memory
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+  [65-128/200] processing batch...  ERROR in batch: CUDA error: out of memory
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+  [129-192/200] processing batch...  ERROR in batch: CUDA error: out of memory
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+  [193-200/200] processing batch...  ERROR in batch: CUDA error: out of memory
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+============================================================
+  Transfer: COX2 -> COX2_MD  (sample=200, batch=64)
+============================================================
+[Feature] Unifying dims: COX2=38, COX2_MD=7 -> 38
+[Feature] Padding COX2_MD with 31 zeros
+[LLM] Initializing LocalLLMInterface (node_feat=38) ...
+[LLM] Downloading from ModelScope: LLM-Research/Meta-Llama-3.1-8B (cache_dir=D:\LCY\RagGnn\checkpoints\modelscope, revision=master)
+Downloading Model from https://www.modelscope.cn to directory: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B
+2026-05-02 11:32:27,936 - modelscope - INFO - Creating symbolic link [D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B].
+2026-05-02 11:32:27,936 - modelscope - WARNING - Failed to create symbolic link D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B for D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B.
+[LLM] Loading tokenizer from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B
+[LLM] Loading model from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B to cuda
+[ERROR] Full-RAG COX2->COX2_MD: CUDA error: out of memory
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+============================================================
+  [No-RAG] COX2 -> COX2_MD  (sample=200, batch=64)
+============================================================
+[Feature] Unifying dims: COX2=38, COX2_MD=7 -> 38
+[Feature] Padding COX2_MD with 31 zeros
+[LLM] Initializing LocalLLMInterface for No-RAG (node_feat=38) ...
+[LLM] Downloading from ModelScope: LLM-Research/Meta-Llama-3.1-8B (cache_dir=D:\LCY\RagGnn\checkpoints\modelscope, revision=master)
+Downloading Model from https://www.modelscope.cn to directory: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B
+2026-05-02 11:32:29,697 - modelscope - INFO - Creating symbolic link [D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B].
+2026-05-02 11:32:29,698 - modelscope - WARNING - Failed to create symbolic link D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B for D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B.
+[LLM] Loading tokenizer from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B
+[LLM] Loading model from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B to cuda
+[ERROR] No-RAG COX2->COX2_MD: CUDA error: out of memory
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+============================================================
+  Transfer: COX2_MD -> COX2  (sample=200, batch=64)
+============================================================
+[Feature] Unifying dims: COX2_MD=7, COX2=38 -> 38
+[Feature] Padding COX2_MD with 31 zeros
+[LLM] Initializing LocalLLMInterface (node_feat=38) ...
+[LLM] Downloading from ModelScope: LLM-Research/Meta-Llama-3.1-8B (cache_dir=D:\LCY\RagGnn\checkpoints\modelscope, revision=master)
+Downloading Model from https://www.modelscope.cn to directory: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B
+2026-05-02 11:32:31,311 - modelscope - INFO - Creating symbolic link [D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B].
+2026-05-02 11:32:31,311 - modelscope - WARNING - Failed to create symbolic link D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B for D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B.
+[LLM] Loading tokenizer from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B
+[LLM] Loading model from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B to cuda
+[ERROR] Full-RAG COX2_MD->COX2: CUDA error: out of memory
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+============================================================
+  [No-RAG] COX2_MD -> COX2  (sample=200, batch=64)
+============================================================
+[Feature] Unifying dims: COX2_MD=7, COX2=38 -> 38
+[Feature] Padding COX2_MD with 31 zeros
+[LLM] Initializing LocalLLMInterface for No-RAG (node_feat=38) ...
+[LLM] Downloading from ModelScope: LLM-Research/Meta-Llama-3.1-8B (cache_dir=D:\LCY\RagGnn\checkpoints\modelscope, revision=master)
+Downloading Model from https://www.modelscope.cn to directory: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B
+2026-05-02 11:32:32,974 - modelscope - INFO - Creating symbolic link [D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B].
+2026-05-02 11:32:32,974 - modelscope - WARNING - Failed to create symbolic link D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B for D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B.
+[LLM] Loading tokenizer from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B
+[LLM] Loading model from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B to cuda
+[ERROR] No-RAG COX2_MD->COX2: CUDA error: out of memory
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+============================================================
+  Transfer: BZR -> BZR_MD  (sample=200, batch=64)
+============================================================
+[Feature] Unifying dims: BZR=56, BZR_MD=8 -> 56
+[Feature] Padding BZR_MD with 48 zeros
+[LLM] Initializing LocalLLMInterface (node_feat=56) ...
+[LLM] Downloading from ModelScope: LLM-Research/Meta-Llama-3.1-8B (cache_dir=D:\LCY\RagGnn\checkpoints\modelscope, revision=master)
+Downloading Model from https://www.modelscope.cn to directory: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B
+2026-05-02 11:32:34,750 - modelscope - INFO - Creating symbolic link [D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B].
+2026-05-02 11:32:34,751 - modelscope - WARNING - Failed to create symbolic link D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B for D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B.
+[LLM] Loading tokenizer from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B
+[LLM] Loading model from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B to cuda
+[ERROR] Full-RAG BZR->BZR_MD: CUDA error: out of memory
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+============================================================
+  [No-RAG] BZR -> BZR_MD  (sample=200, batch=64)
+============================================================
+[Feature] Unifying dims: BZR=56, BZR_MD=8 -> 56
+[Feature] Padding BZR_MD with 48 zeros
+[LLM] Initializing LocalLLMInterface for No-RAG (node_feat=56) ...
+[LLM] Downloading from ModelScope: LLM-Research/Meta-Llama-3.1-8B (cache_dir=D:\LCY\RagGnn\checkpoints\modelscope, revision=master)
+Downloading Model from https://www.modelscope.cn to directory: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B
+2026-05-02 11:32:36,374 - modelscope - INFO - Creating symbolic link [D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B].
+2026-05-02 11:32:36,374 - modelscope - WARNING - Failed to create symbolic link D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B for D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B.
+[LLM] Loading tokenizer from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B
+[LLM] Loading model from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B to cuda
+[ERROR] No-RAG BZR->BZR_MD: CUDA error: out of memory
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+============================================================
+  Transfer: BZR_MD -> BZR  (sample=200, batch=64)
+============================================================
+[Feature] Unifying dims: BZR_MD=8, BZR=56 -> 56
+[Feature] Padding BZR_MD with 48 zeros
+[LLM] Initializing LocalLLMInterface (node_feat=56) ...
+[LLM] Downloading from ModelScope: LLM-Research/Meta-Llama-3.1-8B (cache_dir=D:\LCY\RagGnn\checkpoints\modelscope, revision=master)
+Downloading Model from https://www.modelscope.cn to directory: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B
+2026-05-02 11:32:38,003 - modelscope - INFO - Creating symbolic link [D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B].
+2026-05-02 11:32:38,003 - modelscope - WARNING - Failed to create symbolic link D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B for D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B.
+[LLM] Loading tokenizer from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B
+[LLM] Loading model from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B to cuda
+[ERROR] Full-RAG BZR_MD->BZR: CUDA error: out of memory
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+============================================================
+  [No-RAG] BZR_MD -> BZR  (sample=200, batch=64)
+============================================================
+[Feature] Unifying dims: BZR_MD=8, BZR=56 -> 56
+[Feature] Padding BZR_MD with 48 zeros
+[LLM] Initializing LocalLLMInterface for No-RAG (node_feat=56) ...
+[LLM] Downloading from ModelScope: LLM-Research/Meta-Llama-3.1-8B (cache_dir=D:\LCY\RagGnn\checkpoints\modelscope, revision=master)
+Downloading Model from https://www.modelscope.cn to directory: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B
+2026-05-02 11:32:39,780 - modelscope - INFO - Creating symbolic link [D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B].
+2026-05-02 11:32:39,782 - modelscope - WARNING - Failed to create symbolic link D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B for D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B.
+[LLM] Loading tokenizer from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B
+[LLM] Loading model from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B to cuda
+[ERROR] No-RAG BZR_MD->BZR: CUDA error: out of memory
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+[Save] Results saved to real_experiment_results/
+
+===========================================================================
+  ABLATION STUDY: Full-RAG  vs  No-RAG
+===========================================================================
+Transfer             Cond            Acc     F1    AUC  #Pred
+---------------------------------------------------------------------------
+PROTEINS->DD         Full-RAG     0.5654 0.1043 0.4795    237
+PROTEINS->DD         No-RAG       0.6100 0.0000 0.5000    200
+                     Δ(RAG)       -0.0446 +0.1043
+---------------------------------------------------------------------------
+DD->PROTEINS         Full-RAG      FAILED
+DD->PROTEINS         No-RAG        FAILED
+---------------------------------------------------------------------------
+COX2->COX2_MD        Full-RAG      FAILED
+COX2->COX2_MD        No-RAG        FAILED
+---------------------------------------------------------------------------
+COX2_MD->COX2        Full-RAG      FAILED
+COX2_MD->COX2        No-RAG        FAILED
+---------------------------------------------------------------------------
+BZR->BZR_MD          Full-RAG      FAILED
+BZR->BZR_MD          No-RAG        FAILED
+---------------------------------------------------------------------------
+BZR_MD->BZR          Full-RAG      FAILED
+BZR_MD->BZR          No-RAG        FAILED
+---------------------------------------------------------------------------
+===========================================================================
+
+Experiment completed.
+(lcy) PS D:\LCY\RagGnn> 
