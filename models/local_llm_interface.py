@@ -416,7 +416,15 @@ class LocalLLMInterface:
             do_sample=False,
             pad_token_id=self.tokenizer.eos_token_id,
         )
-        return self.tokenizer.batch_decode(out_ids, skip_special_tokens=True)
+        # 只解码新生成的 token（去掉 prompt 部分），
+        # 防止 prompt 中的文本（如 'label 0'、'label 1'）干扰预测解析
+        input_len = input_ids.shape[1]
+        if out_ids.shape[1] > input_len:
+            new_ids = out_ids[:, input_len:]
+        else:
+            # 某些 HF 版本 inputs_embeds+generate 只返回新 token
+            new_ids = out_ids
+        return self.tokenizer.batch_decode(new_ids, skip_special_tokens=True)
 
     # ----------------------------------------------------------
     # predict（支持 batch）

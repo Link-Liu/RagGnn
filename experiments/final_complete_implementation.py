@@ -663,6 +663,10 @@ class TransferExperiment:
         predictions, true_labels, details = [], [], []
         failed = 0
 
+        # 构造 graph token 占位符（推理时必须使用占位符，而非序列化文本，
+        # 否则 inject_graph_tokens 找不到 graph_token_id，soft token 注入完全失效！）
+        graph_token_placeholder = " ".join([GRAPH_TOKEN] * self.num_graph_tokens)
+
         # B1: 改为按 Batch 推理
         from torch_geometric.data import Batch as PyGBatch
         for start_pos in range(0, n_target, eval_batch_size):
@@ -692,15 +696,16 @@ class TransferExperiment:
                     
                     # RAG 检索（仍然是 CPU，但现在 GNN 是批量的）
                     retrieved = retriever.retrieve_similar_graphs(emb, graph_info, k=5)
-                    graph_tokens_text = serialize_graph_tokens(emb)
 
+                    # 推理 prompt 使用 <graph_token> 占位符，
+                    # 与训练时一致，确保 soft token 注入正常工作
                     prompt = create_detailed_prompt(
                         target_graph_info=graph_info,
                         retrieved_examples=retrieved,
                         property_description=prop_desc,
                         target_dataset=target_name.lower(),
                         source_dataset=source_name.lower(),
-                        graph_tokens_text=graph_tokens_text,
+                        graph_tokens_text=graph_token_placeholder,
                     )
                     batch_prompts.append(prompt)
 
@@ -780,13 +785,33 @@ class TransferExperiment:
                 else:
                     print("[WARNING] No GNN checkpoint found, using random weights.")
 
-        rng = np.random.RandomState(42)
-        n_target = min(sample_size, len(tgt_list))
-        target_indices = rng.choice(len(tgt_list), n_target, replace=False)
+        # 使用与 Full-RAG 相同的 test_indices 保证消融对比公平性
+        ckpt_proj = f"checkpoints/proj_{source_name.lower()}_{target_name.lower()}.pt"
+        if Path(ckpt_proj).exists():
+            ckpt_data = torch.load(ckpt_proj, map_location='cpu')
+            test_indices = ckpt_data.get('test_indices', None)
+            if test_indices is not None:
+                target_indices = test_indices
+                n_target = len(target_indices)
+                print(f"[No-RAG] Using same test_indices as Full-RAG: {n_target} graphs")
+            else:
+                rng = np.random.RandomState(42)
+                n_target = min(sample_size, len(tgt_list))
+                target_indices = rng.choice(len(tgt_list), n_target, replace=False)
+                print(f"[No-RAG] No test_indices in checkpoint, random sampling {n_target} graphs")
+        else:
+            rng = np.random.RandomState(42)
+            n_target = min(sample_size, len(tgt_list))
+            target_indices = rng.choice(len(tgt_list), n_target, replace=False)
+            print(f"[No-RAG] No checkpoint found, random sampling {n_target} graphs")
 
         prop_desc = self.PROP_DESC.get(target_name.lower(), target_name)
         predictions, true_labels, details = [], [], []
         failed = 0
+
+        # 构造 graph token 占位符（No-RAG 也需要 soft token 注入，
+        # 否则 GNN 编码了图但信息无法到达 LLM）
+        graph_token_placeholder = " ".join([GRAPH_TOKEN] * self.num_graph_tokens)
 
         # B1: 改为按 Batch 推理
         from torch_geometric.data import Batch as PyGBatch
@@ -806,10 +831,11 @@ class TransferExperiment:
                         target_graph_info=graph_info,
                         property_description=prop_desc,
                         target_dataset=target_name.lower(),
+                        graph_tokens_text=graph_token_placeholder,
                     )
                     batch_prompts.append(prompt)
 
-                pyg_batch = PyGBatch.from_data_list(batch_data)
+                pyg_batch = PyGBatch.from_data_list(batch_data).to(self.device)
                 results = self.llm.predict_batch(pyg_batch, batch_prompts)
 
                 for i, res in enumerate(results):

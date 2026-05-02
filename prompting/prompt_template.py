@@ -338,9 +338,11 @@ def create_detailed_prompt(target_graph_info: Dict,
 
 def create_no_rag_prompt(target_graph_info: Dict,
                           property_description: str = 'graph classification',
-                          target_dataset: str = 'proteins') -> str:
+                          target_dataset: str = 'proteins',
+                          graph_tokens_text: Optional[str] = None) -> str:
     """
     消融实验用 Prompt：不提供 RAG 检索结果。
+    graph_tokens_text 应传入 <graph_token> 占位符，供 soft token 注入使用。
     """
     target_sem = _get_domain_info(target_dataset)
 
@@ -349,8 +351,22 @@ def create_no_rag_prompt(target_graph_info: Dict,
     parts.append(
         "You are an expert in graph-based machine learning and graph "
         "classification. Your task is to predict a label for a target graph "
-        "based solely on its structural properties."
+        "based on its GNN embedding and structural properties."
     )
+
+    # GNN Embedding Token Section（与 Full-RAG prompt 一致的 soft token 注入点）
+    parts.append(f"\n{'='*60}")
+    parts.append("TARGET GRAPH — GNN EMBEDDING TOKENS")
+    parts.append(f"{'='*60}")
+    if graph_tokens_text:
+        parts.append(
+            "  The graph has been encoded by a pre-trained GNN encoder.\n"
+            "  The most significant embedding dimensions (L2-normalized) are:\n"
+            f"  {graph_tokens_text}\n"
+            "  Format: [dim_index:value, ...] — values reflect learned structural patterns."
+        )
+    else:
+        parts.append("  (GNN embedding not available for this graph.)")
 
     parts.append(f"\n{'='*60}")
     parts.append(f"TARGET GRAPH  (Task: {target_sem['task']})")
@@ -379,17 +395,17 @@ def create_no_rag_prompt(target_graph_info: Dict,
     parts.append(f"{'='*60}")
     parts.append(
         "  No reference graphs are provided in this ablation condition.\n"
-        "  Please rely exclusively on the structural properties of the\n"
-        "  target graph and your knowledge of graph classification."
+        "  Please rely on the GNN embedding tokens and the structural\n"
+        "  properties of the target graph for your prediction."
     )
 
     parts.append(f"\n{'='*60}")
     parts.append("REASONING INSTRUCTION  [Zero-shot]")
     parts.append(f"{'='*60}")
     parts.append(
-        "  Step 1 — Analyse the target graph structure:\n"
-        "    Consider graph size, density, degree distribution,\n"
-        "    connectivity patterns, and node feature statistics."
+        "  Step 1 — Analyse the GNN embedding tokens:\n"
+        "    Examine the activated dimensions and their values.\n"
+        "    What structural patterns do they suggest?"
     )
     parts.append(
         f"  Step 2 — Apply domain knowledge:\n"
