@@ -1,0 +1,215 @@
+(lcy) PS D:\LCY\RagGnn> & C:/Users/DELL/anaconda3/envs/lcy/python.exe d:/LCY/RagGnn/experiments/final_complete_implementation.py
+============================================================
+  Domain-Aware RAG-MDA — Graph Transfer Learning + Ablation
+  LLM Backend: ModelScope (frozen, soft graph token injection)
+============================================================
+[Init] device=cuda, llm=LLM-Research/Meta-Llama-3.1-8B
+
+============================================================
+  Transfer: PROTEINS -> DD  (sample=50, batch=64)
+============================================================
+[Feature] Unifying dims: PROTEINS=4, DD=89 -> 89
+[Feature] Padding PROTEINS with 85 zeros
+[LLM] Initializing LocalLLMInterface (node_feat=89) ...
+[LLM] Downloading from ModelScope: LLM-Research/Meta-Llama-3.1-8B (cache_dir=D:\LCY\RagGnn\checkpoints\modelscope, revision=master)
+Downloading Model from https://www.modelscope.cn to directory: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B
+2026-05-02 01:02:22,265 - modelscope - INFO - Creating symbolic link [D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B].
+2026-05-02 01:02:22,266 - modelscope - WARNING - Failed to create symbolic link D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B for D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B.
+[LLM] Loading tokenizer from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B
+[LLM] Loading model from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B to cuda
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 291/291 [00:05<00:00, 55.48it/s]
+[LLM] Model actually loaded on: cuda:0
+[transformers] The new embeddings will be initialized from a multivariate normal distribution that has old embeddings' mean and covariance. As described in this article: https://nlp.stanford.edu/~johnhew/vocab-expansion.html. To disable this, use `mean_resizing=False`
+[transformers] The new lm_head weights will be initialized from a multivariate normal distribution that has old embeddings' mean and covariance. As described in this article: https://nlp.stanford.edu/~johnhew/vocab-expansion.html. To disable this, use `mean_resizing=False`
+[LLM] All LLM parameters FROZEN.
+[GNN] node_feat=89, hidden=128, layers=4, graph_tokens=8
+[Params] Trainable (GNN+Proj): 269,653,120 | Frozen (LLM): 8,030,269,440 | Ratio: 3.249%
+[GNN-Pretrain] Loaded from checkpoints/gnn_proteins.pt
+
+============================================================
+  [Joint Train] GNN + Projector  (PROTEINS -> DD)
+  Train epochs=5, lr_gnn=0.0001, lr_proj=0.0003
+============================================================
+  Train: 753, Val: 188, Test: 237 (held-out for evaluation)
+  Epoch 1/5  train_loss=1.2686  val_loss=1.6432  ← best ✓
+  Epoch 2/5  train_loss=0.6420  val_loss=0.7130  ← best ✓
+  Epoch 3/5  train_loss=0.5784  val_loss=0.6208  ← best ✓
+  Epoch 4/5  train_loss=0.5659  val_loss=0.6439
+  Epoch 5/5  train_loss=0.5550  val_loss=0.5957  ← best ✓
+  [Joint Train] Best checkpoint saved -> checkpoints/proj_proteins_dd.pt (val_loss=0.5957)
+[Eval] Test set: 237 graphs (never seen during training)
+[RAG] Encoding 1113 source graphs ...
+[RAG] Indexed 1113 source graphs
+  [1-64/237] processing batch...[transformers] Ignoring clean_up_tokenization_spaces=True for BPE tokenizer TokenizersBackend. The clean_up_tokenization post-processing step is designed for WordPiece tokenizers and is destructive for BPE (it strips spaces before punctuation). Set clean_up_tokenization_spaces=False to suppress this warning, or set clean_up_tokenization_spaces_for_bpe_even_though_it_will_corrupt_output=True to force cleanup anyway.
+ done.
+  [65-128/237] processing batch... done.
+  [129-192/237] processing batch... done.
+  [193-237/237] processing batch... done.
+
+[Results] PROTEINS->DD:
+  Accuracy : 0.5654  (134/237)
+  F1       : 0.1043
+  Precision: 0.2857
+  Recall   : 0.0638
+  AUC      : 0.4795
+  Failed   : 0
+
+============================================================
+  [No-RAG] PROTEINS -> DD  (sample=50, batch=64)
+============================================================
+[Feature] Unifying dims: PROTEINS=4, DD=89 -> 89
+[Feature] Padding PROTEINS with 85 zeros
+  [1-50/50] processing batch... done.
+
+[Results] [No-RAG] PROTEINS->DD:
+  Accuracy : 0.7200  (36/50)
+  F1       : 0.0000
+  Precision: 0.0000
+  Recall   : 0.0000
+  AUC      : 0.5000
+  Failed   : 0
+
+============================================================
+  Transfer: COX2 -> COX2_MD  (sample=50, batch=64)
+============================================================
+[Feature] Unifying dims: COX2=38, COX2_MD=7 -> 38
+[Feature] Padding COX2_MD with 31 zeros
+[LLM] Initializing LocalLLMInterface (node_feat=38) ...
+[LLM] Downloading from ModelScope: LLM-Research/Meta-Llama-3.1-8B (cache_dir=D:\LCY\RagGnn\checkpoints\modelscope, revision=master)
+Downloading Model from https://www.modelscope.cn to directory: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B
+2026-05-02 02:12:25,492 - modelscope - INFO - Creating symbolic link [D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B].
+2026-05-02 02:12:25,492 - modelscope - WARNING - Failed to create symbolic link D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B for D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B.
+[LLM] Loading tokenizer from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B
+[LLM] Loading model from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B to cuda
+Loading weights: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 291/291 [00:04<00:00, 61.76it/s]
+[LLM] Model actually loaded on: cuda:0
+[LLM] All LLM parameters FROZEN.
+[GNN] node_feat=38, hidden=128, layers=4, graph_tokens=8
+[Params] Trainable (GNN+Proj): 269,646,592 | Frozen (LLM): 8,030,269,440 | Ratio: 3.249%
+[GNN-Pretrain] Training on 467 graphs, 30 epochs ...
+[ERROR] Full-RAG COX2->COX2_MD: 'str' object has no attribute 'type'
+
+============================================================
+  [No-RAG] COX2 -> COX2_MD  (sample=50, batch=64)
+============================================================
+[Feature] Unifying dims: COX2=38, COX2_MD=7 -> 38
+[Feature] Padding COX2_MD with 31 zeros
+  [1-50/50] processing batch... done.
+
+[Results] [No-RAG] COX2->COX2_MD:
+  Accuracy : 0.6000  (30/50)
+  F1       : 0.0000
+  Precision: 0.0000
+  Recall   : 0.0000
+  AUC      : 0.5000
+  Failed   : 0
+
+============================================================
+  Transfer: COX2_MD -> COX2  (sample=50, batch=64)
+============================================================
+[Feature] Unifying dims: COX2_MD=7, COX2=38 -> 38
+[Feature] Padding COX2_MD with 31 zeros
+[GNN-Pretrain] Training on 303 graphs, 30 epochs ...
+[ERROR] Full-RAG COX2_MD->COX2: 'str' object has no attribute 'type'
+
+============================================================
+  [No-RAG] COX2_MD -> COX2  (sample=50, batch=64)
+============================================================
+[Feature] Unifying dims: COX2_MD=7, COX2=38 -> 38
+[Feature] Padding COX2_MD with 31 zeros
+  [1-50/50] processing batch... done.
+
+[Results] [No-RAG] COX2_MD->COX2:
+  Accuracy : 0.7800  (39/50)
+  F1       : 0.0000
+  Precision: 0.0000
+  Recall   : 0.0000
+  AUC      : 0.5000
+  Failed   : 0
+
+============================================================
+  Transfer: BZR -> BZR_MD  (sample=50, batch=64)
+============================================================
+[Feature] Unifying dims: BZR=56, BZR_MD=8 -> 56
+[Feature] Padding BZR_MD with 48 zeros
+[LLM] Initializing LocalLLMInterface (node_feat=56) ...
+[LLM] Downloading from ModelScope: LLM-Research/Meta-Llama-3.1-8B (cache_dir=D:\LCY\RagGnn\checkpoints\modelscope, revision=master)
+Downloading Model from https://www.modelscope.cn to directory: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B
+2026-05-02 02:27:55,616 - modelscope - INFO - Creating symbolic link [D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B].
+2026-05-02 02:27:55,617 - modelscope - WARNING - Failed to create symbolic link D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B for D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B.
+[LLM] Loading tokenizer from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B
+[LLM] Loading model from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B to cuda
+Loading weights: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 291/291 [00:04<00:00, 60.34it/s]
+[LLM] Model actually loaded on: cuda:0
+[LLM] All LLM parameters FROZEN.
+[GNN] node_feat=56, hidden=128, layers=4, graph_tokens=8
+[Params] Trainable (GNN+Proj): 269,648,896 | Frozen (LLM): 8,030,269,440 | Ratio: 3.249%
+[GNN-Pretrain] Training on 405 graphs, 30 epochs ...
+[ERROR] Full-RAG BZR->BZR_MD: 'str' object has no attribute 'type'
+
+============================================================
+  [No-RAG] BZR -> BZR_MD  (sample=50, batch=64)
+============================================================
+[Feature] Unifying dims: BZR=56, BZR_MD=8 -> 56
+[Feature] Padding BZR_MD with 48 zeros
+  [1-50/50] processing batch... done.
+
+[Results] [No-RAG] BZR->BZR_MD:
+  Accuracy : 0.4200  (21/50)
+  F1       : 0.0000
+  Precision: 0.0000
+  Recall   : 0.0000
+  AUC      : 0.5000
+  Failed   : 0
+
+============================================================
+  Transfer: BZR_MD -> BZR  (sample=50, batch=64)
+============================================================
+[Feature] Unifying dims: BZR_MD=8, BZR=56 -> 56
+[Feature] Padding BZR_MD with 48 zeros
+[GNN-Pretrain] Training on 306 graphs, 30 epochs ...
+[ERROR] Full-RAG BZR_MD->BZR: 'str' object has no attribute 'type'
+
+============================================================
+  [No-RAG] BZR_MD -> BZR  (sample=50, batch=64)
+============================================================
+[Feature] Unifying dims: BZR_MD=8, BZR=56 -> 56
+[Feature] Padding BZR_MD with 48 zeros
+  [1-50/50] processing batch... done.
+
+[Results] [No-RAG] BZR_MD->BZR:
+  Accuracy : 0.8800  (44/50)
+  F1       : 0.0000
+  Precision: 0.0000
+  Recall   : 0.0000
+  AUC      : 0.5000
+  Failed   : 0
+
+[Save] Results saved to real_experiment_results/
+
+===========================================================================
+  ABLATION STUDY: Full-RAG  vs  No-RAG
+===========================================================================
+Transfer             Cond            Acc     F1    AUC  #Pred
+---------------------------------------------------------------------------
+PROTEINS->DD         Full-RAG     0.5654 0.1043 0.4795    237
+PROTEINS->DD         No-RAG       0.7200 0.0000 0.5000     50
+                     Δ(RAG)       -0.1546 +0.1043
+---------------------------------------------------------------------------
+COX2->COX2_MD        Full-RAG      FAILED
+COX2->COX2_MD        No-RAG       0.6000 0.0000 0.5000     50
+---------------------------------------------------------------------------
+COX2_MD->COX2        Full-RAG      FAILED
+COX2_MD->COX2        No-RAG       0.7800 0.0000 0.5000     50
+---------------------------------------------------------------------------
+BZR->BZR_MD          Full-RAG      FAILED
+BZR->BZR_MD          No-RAG       0.4200 0.0000 0.5000     50
+---------------------------------------------------------------------------
+BZR_MD->BZR          Full-RAG      FAILED
+BZR_MD->BZR          No-RAG       0.8800 0.0000 0.5000     50
+---------------------------------------------------------------------------
+===========================================================================
+
+Experiment completed.
+(lcy) PS D:\LCY\RagGnn> 

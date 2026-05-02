@@ -42,7 +42,8 @@ def pretrain_gnn_standalone(gnn, dataset, device, epochs=30,
     criterion = nn.BCEWithLogitsLoss()
     
     # A5: DataLoader 参数调优
-    use_cuda = device.type == 'cuda'
+    # 兼容 device 为字符串或 torch.device 对象的情况
+    use_cuda = (device == 'cuda' or (isinstance(device, torch.device) and device.type == 'cuda'))
     loader = DataLoader(
         list(dataset), 
         batch_size=batch_size, 

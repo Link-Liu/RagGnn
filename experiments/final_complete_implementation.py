@@ -122,7 +122,8 @@ class GNNEmbeddingEngine:
         criterion = nn.BCEWithLogitsLoss()
         
         # A5: DataLoader 参数调优
-        use_cuda = self.device.type == 'cuda'
+        # 兼容 device 为字符串或 torch.device 对象
+        use_cuda = (self.device == 'cuda' or (isinstance(self.device, torch.device) and self.device.type == 'cuda'))
         loader = DataLoader(
             list(dataset), 
             batch_size=batch_size, 
@@ -347,6 +348,7 @@ class TransferExperiment:
     def _joint_train(
         self,
         tgt_list: List,
+        src_list: List,
         target_name: str,
         source_name: str,
         ckpt_proj: str,
@@ -360,29 +362,19 @@ class TransferExperiment:
     ) -> List[int]:
         """
         用目标域的标签数据，联合训练 GNN + Projector。
-
-        划分比例：train 64% / val 16% / test 20%（test 从不参与训练）
-        返回 test_indices，供 run_transfer 做评估。
-
-        训练数据流：
-            目标图 → GNN(可训练) → Projector(可训练) → soft tokens
-            → 替换 prompt 中 <graph_token> 位置 → 冻结 LLM → CE loss
-            → 反向传播 → 只更新 GNN + Projector
-
-        Returns:
-            test_indices: 测试集索引（未被训练/验证使用的样本）
+        训练时引入 RAG 例子以对齐推理阶段。
         """
         import random
         from torch_geometric.data import Batch as PyGBatch
 
         print(f"\n{'='*60}")
-        print(f"  [Joint Train] GNN + Projector  ({source_name} -> {target_name})")
+        print(f"  [Joint Train] GNN + Projector (RAG-Augmented) ({source_name} -> {target_name})")
         print(f"  Train epochs={train_epochs}, lr_gnn={lr_gnn}, lr_proj={lr_proj}")
         print(f"{'='*60}")
 
         prop_desc = self.PROP_DESC.get(target_name.lower(), target_name)
 
-        # ---- Train / Val / Test 三段划分 ----
+        # ---- 划分数据集 ----
         indices = list(range(len(tgt_list)))
         random.seed(42)
         random.shuffle(indices)
@@ -394,21 +386,62 @@ class TransferExperiment:
         print(f"  Train: {len(train_indices)}, Val: {len(val_indices)}, "
               f"Test: {len(test_indices)} (held-out for evaluation)")
 
-        # ---- 优化器：只优化 GNN + Projector ----
-        optimizer = torch.optim.AdamW([
-            {"params": self.llm.gnn.parameters(), "lr": lr_gnn},
-            {"params": self.llm.projector.parameters(), "lr": lr_proj},
-        ], weight_decay=1e-5)
-
-        # ---- 数据准备 (使用 DataLoader 压榨性能) ----
-        train_set = [tgt_list[i] for i in train_indices]
-        val_set   = [tgt_list[i] for i in val_indices]
+        # ---- 构建 RAG 预检索索引（使用当前预训练 GNN） ----
+        print(f"  [RAG-Setup] Building temporary retrieval index from {source_name} ...")
+        # 暂时关闭训练模式以获取稳定的嵌入
+        self.llm.gnn.eval()
+        src_embs, src_labels = _encode_dataset_with_llm(self.llm, src_list, self.device)
+        src_infos = []
+        for i, (data, emb) in enumerate(zip(src_list, src_embs)):
+            info = extract_graph_info(data, f"{source_name}_{i}", source_name)
+            info['source_domain'] = source_name.lower()
+            info['graph_tokens_text'] = serialize_graph_tokens(emb)
+            src_infos.append(info)
         
-        # 4090 优化：开启 num_workers=4
-        train_loader = DataLoader(train_set, batch_size=train_batch_size, shuffle=True, 
-                                  num_workers=4, pin_memory=(self.device == 'cuda'))
-        val_loader   = DataLoader(val_set, batch_size=train_batch_size, shuffle=False, 
-                                  num_workers=4, pin_memory=(self.device == 'cuda'))
+        retriever = GraphRetriever(embedding_dim=self.hidden_dim)
+        retriever.add_source_graphs(src_embs, src_infos, src_labels)
+
+        # ---- 为训练/验证集预先检索例子 ----
+        def pre_retrieve(dataset_indices):
+            print(f"  [RAG-Setup] Pre-retrieving for {len(dataset_indices)} samples ...")
+            results = {}
+            for idx in dataset_indices:
+                data = tgt_list[idx]
+                emb = _encode_single_graph(self.llm, data, self.device)
+                info = extract_graph_info(data, f"{target_name}_{idx}", target_name)
+                retrieved = retriever.retrieve_similar_graphs(emb, info, k=5)
+                results[idx] = retrieved
+            return results
+
+        train_rag_cache = pre_retrieve(train_indices)
+        val_rag_cache = pre_retrieve(val_indices)
+
+        # ---- 封装带 RAG 的自定义 Dataset ----
+        class RAGDataset(torch.utils.data.Dataset):
+            def __init__(self, indices, rag_cache):
+                self.indices = indices
+                self.rag_cache = rag_cache
+            def __len__(self): return len(self.indices)
+            def __getitem__(self, i):
+                idx = self.indices[i]
+                return tgt_list[idx], self.rag_cache[idx]
+
+        def collate_rag(batch_samples):
+            data_list, rag_list = zip(*batch_samples)
+            return PyGBatch.from_data_list(data_list), rag_list
+
+        train_loader = torch.utils.data.DataLoader(
+            RAGDataset(train_indices, train_rag_cache), 
+            batch_size=train_batch_size, shuffle=True, collate_fn=collate_rag,
+            num_workers=4, pin_memory=(self.device == 'cuda')
+        )
+        val_loader = torch.utils.data.DataLoader(
+            RAGDataset(val_indices, val_rag_cache), 
+            batch_size=train_batch_size, shuffle=False, collate_fn=collate_rag,
+            num_workers=4, pin_memory=(self.device == 'cuda')
+        )
+
+        # ---- 优化器：只优化 GNN + Projector ----
 
         # ---- 训练 prompt ----
         graph_token_str = " ".join([GRAPH_TOKEN] * self.num_graph_tokens)
@@ -422,9 +455,8 @@ class TransferExperiment:
         # ---- 训练循环 ----
         best_val_loss = float("inf")
         best_state = None
-        
-        # B2: AMP 混合精度训练 (针对 bfloat16，不需要 GradScaler)
         use_amp = self.device == "cuda"
+        graph_token_placeholder = " ".join([GRAPH_TOKEN] * self.num_graph_tokens)
 
         for epoch in range(1, train_epochs + 1):
             # ---- 训练阶段 ----
@@ -433,10 +465,24 @@ class TransferExperiment:
             optimizer.zero_grad()
 
             epoch_loss, n_steps = 0.0, 0
-            for batch in train_loader:
+            for batch, rag_examples_list in train_loader:
                 batch = batch.to(self.device)
                 B = batch.num_graphs
-                prompts = [train_prompt] * B
+                
+                # 构建对齐推理阶段的 Detailed Prompt
+                prompts = []
+                for i in range(B):
+                    info = extract_graph_info(batch[i], "train", target_name)
+                    p = create_detailed_prompt(
+                        target_graph_info=info,
+                        retrieved_examples=rag_examples_list[i],
+                        property_description=prop_desc,
+                        target_dataset=target_name.lower(),
+                        source_dataset=source_name.lower(),
+                        graph_tokens_text=graph_token_placeholder
+                    )
+                    prompts.append(p)
+                
                 labels_text = [str(int(y.item())) for y in batch.y]
 
                 with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.bfloat16):
@@ -459,16 +505,28 @@ class TransferExperiment:
 
             avg_train_loss = epoch_loss / max(n_steps, 1)
 
-            # ---- 验证阶段 (增加 Autocast) ----
+            # ---- 验证阶段 (增加 Autocast 和 Detailed Prompt) ----
             self.llm.gnn.eval()
             self.llm.projector.eval()
             val_loss, val_steps = 0.0, 0
 
             with torch.no_grad():
-                for batch in val_loader:
+                for batch, rag_examples_list in val_loader:
                     batch = batch.to(self.device)
                     B = batch.num_graphs
-                    prompts = [train_prompt] * B
+                    prompts = []
+                    for i in range(B):
+                        info = extract_graph_info(batch[i], "val", target_name)
+                        p = create_detailed_prompt(
+                            target_graph_info=info,
+                            retrieved_examples=rag_examples_list[i],
+                            property_description=prop_desc,
+                            target_dataset=target_name.lower(),
+                            source_dataset=source_name.lower(),
+                            graph_tokens_text=graph_token_placeholder
+                        )
+                        prompts.append(p)
+                    
                     labels_text = [str(int(y.item())) for y in batch.y]
 
                     with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.bfloat16):
@@ -551,7 +609,7 @@ class TransferExperiment:
         #    返回 test_indices（从未参与训练/验证的样本，用于评估）
         if not Path(ckpt_proj).exists():
             test_indices = self._joint_train(
-                tgt_list, target_name, source_name, ckpt_proj
+                tgt_list, src_list, target_name, source_name, ckpt_proj
             )
         else:
             # 从已保存的 checkpoint 恢复 test_indices
@@ -906,11 +964,11 @@ def main():
 
     # 运行消融实验
     ablation = experiment.run_ablation_suite(
-        sample_size=50,
+        sample_size=200,
         eval_batch_size=64, 
         pairs=[
             ('PROTEINS', 'DD'),
-
+            ('DD', 'PROTEINS'),
             ('COX2', 'COX2_MD'),
             ('COX2_MD', 'COX2'),
             ('BZR', 'BZR_MD'),
