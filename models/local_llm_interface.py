@@ -172,7 +172,7 @@ class LocalLLMInterface:
         gnn_hidden_dim: int = 128,     # GNN 隐层维度
         gnn_num_layers: int = 4,       # GNN 层数
         num_graph_tokens: int = 8,     # 每图注入的 soft token 数
-        max_new_tokens: int = 32,      # 生成时最大新 token 数
+        max_new_tokens: int = 128,     # 生成时最大新 token 数（32 太小，LLM 来不及输出 Answer）
         device: str = "auto",
         load_in_8bit: bool = False,    # 是否用 8-bit 量化节省显存
         modelscope_cache_dir: Optional[str] = None,

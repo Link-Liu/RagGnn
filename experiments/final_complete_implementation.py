@@ -353,10 +353,10 @@ class TransferExperiment:
         source_name: str,
         ckpt_proj: str,
         train_epochs: int = 15,
-        train_batch_size: int = 16,
+        train_batch_size: int = 2,    # 24GB GPU 上 8B LLM 前向需要大量显存
         lr_gnn: float = 5e-5,
         lr_proj: float = 2e-4,
-        grad_accum_steps: int = 2,
+        grad_accum_steps: int = 8,    # 等效 batch_size = 2*8 = 16
         train_ratio: float = 0.64,
         val_ratio: float = 0.16,
     ) -> List[int]:

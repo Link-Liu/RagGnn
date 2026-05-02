@@ -1,82 +1,87 @@
-[1-8/200] processing batch...[transformers] Ignoring clean_up_tokenization_spaces=True for BPE tokenizer TokenizersBackend. The clean_up_tokenization post-processing step is designed for WordPiece tokenizers and is destructive for BPE (it strips spaces before punctuation). Set clean_up_tokenization_spaces=False to suppress this warning, or set clean_up_tokenization_spaces_for_bpe_even_though_it_will_corrupt_output=True to force cleanup anyway.
-  [WARN] Cannot determine label, random fallback -> 0  (response: '— protein does NOT have enzymatic activity\n        1 = Enzyme — protein is an en')
-  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 0  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 0  (response: 'protein does NOT have enzymatic activity\n        1 = Enzyme — protein is an enzy')
-  [WARN] Cannot determine label, random fallback -> 1  (response: 'protein does NOT have enzymatic activity\n        1 = Enzyme — protein is an enzy')
-  [WARN] Cannot determine label, random fallback -> 0  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 0  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 0  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
+(lcy) PS D:\LCY\RagGnn> & C:/Users/DELL/anaconda3/envs/lcy/python.exe d:/LCY/RagGnn/experiments/final_complete_implementation.py
+============================================================
+  Domain-Aware RAG-MDA — Graph Transfer Learning + Ablation
+  LLM Backend: ModelScope (frozen, soft graph token injection)
+============================================================
+[Init] device=cuda, llm=LLM-Research/Meta-Llama-3.1-8B
+
+============================================================
+  Transfer: PROTEINS -> DD  (sample=200, batch=8)
+============================================================
+[Feature] Unifying dims: PROTEINS=4, DD=89 -> 89
+[Feature] Padding PROTEINS with 85 zeros
+[LLM] Initializing LocalLLMInterface (node_feat=89) ...
+[LLM] Downloading from ModelScope: LLM-Research/Meta-Llama-3.1-8B (cache_dir=D:\LCY\RagGnn\checkpoints\modelscope, revision=master)
+Downloading Model from https://www.modelscope.cn to directory: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B
+2026-05-02 14:12:33,184 - modelscope - INFO - Creating symbolic link [D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B].
+2026-05-02 14:12:33,185 - modelscope - WARNING - Failed to create symbolic link D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B for D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B.
+[LLM] Loading tokenizer from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B
+[LLM] Loading model from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B to cuda
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 291/291 [00:05<00:00, 56.89it/s]
+[LLM] Model actually loaded on: cuda:0
+[transformers] The new embeddings will be initialized from a multivariate normal distribution that has old embeddings' mean and covariance. As described in this article: https://nlp.stanford.edu/~johnhew/vocab-expansion.html. To disable this, use `mean_resizing=False`
+[transformers] The new lm_head weights will be initialized from a multivariate normal distribution that has old embeddings' mean and covariance. As described in this article: https://nlp.stanford.edu/~johnhew/vocab-expansion.html. To disable this, use `mean_resizing=False`
+[LLM] All LLM parameters FROZEN.
+[GNN] node_feat=89, hidden=128, layers=4, graph_tokens=8
+[Params] Trainable (GNN+Proj): 269,653,120 | Frozen (LLM): 8,030,269,440 | Ratio: 3.249%
+[GNN-Pretrain] Training on 1113 graphs, 50 epochs ...
+  Epoch   1/50  loss=0.6810  best=0.6810
+  Epoch   5/50  loss=0.5948  best=0.5948
+  Epoch  10/50  loss=0.5664  best=0.5664
+  Epoch  15/50  loss=0.5544  best=0.5544
+  Epoch  20/50  loss=0.5407  best=0.5407
+  Epoch  25/50  loss=0.5541  best=0.5324
+  Epoch  30/50  loss=0.5191  best=0.5191
+  Epoch  35/50  loss=0.5292  best=0.5156
+  Epoch  40/50  loss=0.5090  best=0.5058
+  Epoch  45/50  loss=0.4768  best=0.4768
+  Epoch  50/50  loss=0.5000  best=0.4768
+[GNN-Pretrain] Done. best_loss=0.4768
+[GNN-Pretrain] Saved -> checkpoints/gnn_proteins.pt
+
+============================================================
+  [Joint Train] GNN + Projector (RAG-Augmented) (PROTEINS -> DD)
+  Train epochs=15, lr_gnn=5e-05, lr_proj=0.0002
+============================================================
+  Train: 753, Val: 188, Test: 237 (held-out for evaluation)
+  [RAG-Setup] Building temporary retrieval index from PROTEINS ...
+  [RAG-Setup] Pre-retrieving for 753 samples ...
+  [RAG-Setup] Pre-retrieving for 188 samples ...
+[ERROR] Full-RAG PROTEINS->DD: CUDA out of memory. Tried to allocate 3.92 GiB. GPU 0 has a total capacity of 23.99 GiB of which 0 bytes is free. Of the allocated memory 80.85 GiB is allocated by PyTorch, and 2.82 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+
+============================================================
+  [No-RAG] PROTEINS -> DD  (sample=200, batch=8)
+============================================================
+[Feature] Unifying dims: PROTEINS=4, DD=89 -> 89
+[Feature] Padding PROTEINS with 85 zeros
+[No-RAG] No checkpoint found, random sampling 200 graphs
+  [1-8/200] processing batch...[transformers] Ignoring clean_up_tokenization_spaces=True for BPE tokenizer TokenizersBackend. The clean_up_tokenization post-processing step is designed for WordPiece tokenizers and is destructive for BPE (it strips spaces before punctuation). Set clean_up_tokenization_spaces=False to suppress this warning, or set clean_up_tokenization_spaces_for_bpe_even_though_it_will_corrupt_output=True to force cleanup anyway.
+  [WARN] Cannot determine label, random fallback -> 0  (response: 'Structure Classification (DD)], what label\n    would you predict for this target')
+  [WARN] Cannot determine label, random fallback -> 1  (response: 'Structure Classification (DD)], what label\n    would you predict for this target')
+  [WARN] Cannot determine label, random fallback -> 1  (response: 'Structure Classification (DD)], what is your\n    prediction for the target graph')
+  [WARN] Cannot determine label, random fallback -> 1  (response: 'Classification (DD)], what is your\n    prediction for the target graph?\n  Step 3')
+  [WARN] Cannot determine label, random fallback -> 1  (response: 'Classification (DD)], what is your\n    prediction for the target graph?\n  Step 3')
+  [WARN] Cannot determine label, random fallback -> 0  (response: 'Structure Classification (DD)], what is your\n    prediction for the target graph')
+  [WARN] Cannot determine label, random fallback -> 1  (response: 'Structure Classification (DD)], what is your\n    prediction for the target graph')
+  [WARN] Cannot determine label, random fallback -> 1  (response: 'Structure Classification (DD)], what is your\n    prediction for the target graph')
  done.
-  [9-16/200] processing batch...  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 0  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 0  (response: 'protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an en')
-  [WARN] Cannot determine label, random fallback -> 0  (response: '— protein does NOT have enzymatic activity\n        1 = Enzyme — protein is an en')
-  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
+  [9-16/200] processing batch...  [WARN] Cannot determine label, random fallback -> 1  (response: 'Structure Classification (DD)], what is your\n    prediction for the target graph')
+  [WARN] Cannot determine label, random fallback -> 1  (response: 'Structure Classification (DD)], what label\n    would you predict for this target')
+  [WARN] Cannot determine label, random fallback -> 1  (response: 'Structure Classification (DD)], what label\n    would you predict for this target')
+  [WARN] Cannot determine label, random fallback -> 1  (response: 'Structure Classification (DD)], what is your\n    prediction for the target graph')
+  [WARN] Cannot determine label, random fallback -> 1  (response: 'Structure Classification (DD)], what is your\n    prediction for the target graph')
+  [WARN] Cannot determine label, random fallback -> 0  (response: 'Classification (DD)], what is your\n    prediction for the target graph?\n  Step 3')
+  [WARN] Cannot determine label, random fallback -> 1  (response: 'Structure Classification (DD)], what label\n    would you predict for this target')
+  [WARN] Cannot determine label, random fallback -> 0  (response: 'Structure Classification (DD)], what is your\n    prediction for the target graph')
  done.
-  [17-24/200] processing batch...  [WARN] Cannot determine label, random fallback -> 1  (response: 'protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an en')
-  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 1  (response: 'protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an en')
-  [WARN] Cannot determine label, random fallback -> 0  (response: 'protein does NOT have enzymatic activity\n        1 = Enzyme — protein is an enzy')
-  [WARN] Cannot determine label, random fallback -> 0  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 0  (response: 'protein does NOT have enzymatic activity\n        1 = Enzyme — protein is an enzy')
-  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n        1 = Enzyme — protein is an en')
+  [17-24/200] processing batch...  [WARN] Cannot determine label, random fallback -> 0  (response: 'Classification (DD)], what label\n    would you predict for this target graph?\n  ')
+  [WARN] Cannot determine label, random fallback -> 1  (response: 'Structure Classification (DD)], what is your\n    prediction for the target graph')
+  [WARN] Cannot determine label, random fallback -> 1  (response: 'Classification (DD)], what label\n    would you predict for this target graph?\n  ')
+  [WARN] Cannot determine label, random fallback -> 0  (response: 'Classification (DD)], what is your\n    prediction for the target graph?\n  Step 3')
+  [WARN] Cannot determine label, random fallback -> 0  (response: 'Structure Classification (DD)], what is your\n    prediction for the target graph')
+  [WARN] Cannot determine label, random fallback -> 0  (response: 'Classification (DD)], what label\n    would you predict for this target graph?\n  ')
+  [WARN] Cannot determine label, random fallback -> 0  (response: 'Structure Classification (DD)], what is your\n    prediction for the target graph')
+  [WARN] Cannot determine label, random fallback -> 1  (response: 'Structure Classification (DD)], what is your\n    prediction for the target graph')
  done.
-  [25-32/200] processing batch...  [WARN] Cannot determine label, random fallback -> 0  (response: 'protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an en')
-  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 0  (response: 'protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an en')
-  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 0  (response: 'protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an en')
-  [WARN] Cannot determine label, random fallback -> 0  (response: 'protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an en')
-  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n        1 = Enzyme — protein is an en')
-  [WARN] Cannot determine label, random fallback -> 1  (response: 'protein does NOT have enzymatic activity\n        1 = Enzyme — protein is an enzy')
- done.
-  [33-40/200] processing batch...  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n        1 = Enzyme — protein is an en')
-  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n        1 = Enzyme — protein is an en')
-  [WARN] Cannot determine label, random fallback -> 0  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 0  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 0  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
- done.
-  [41-48/200] processing batch...  [WARN] Cannot determine label, random fallback -> 1  (response: 'protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an en')
-  [WARN] Cannot determine label, random fallback -> 0  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 0  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 0  (response: 'protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an en')
-  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 1  (response: 'protein does NOT have enzymatic activity\n        1 = Enzyme — protein is an enzy')
-  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
- done.
-  [49-56/200] processing batch...  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n        1 = Enzyme — protein is an en')
-  [WARN] Cannot determine label, random fallback -> 0  (response: 'protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an en')
-  [WARN] Cannot determine label, random fallback -> 1  (response: 'protein does NOT have enzymatic activity\n        1 = Enzyme — protein is an enzy')
-  [WARN] Cannot determine label, random fallback -> 0  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 1  (response: 'protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an en')
- done.
-  [57-64/200] processing batch...  [WARN] Cannot determine label, random fallback -> 0  (response: 'protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an en')
-  [WARN] Cannot determine label, random fallback -> 0  (response: 'protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an en')
-  [WARN] Cannot determine label, random fallback -> 1  (response: 'protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an en')
-  [WARN] Cannot determine label, random fallback -> 0  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 0  (response: 'protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an en')
-  [WARN] Cannot determine label, random fallback -> 0  (response: 'protein does NOT have enzymatic activity\n        1 = Enzyme — protein is an enzy')
-  [WARN] Cannot determine label, random fallback -> 1  (response: 'protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an en')
-  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n        1 = Enzyme — protein is an en')
- done.
-  [65-72/200] processing batch...  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 1  (response: 'protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an en')
-  [WARN] Cannot determine label, random fallback -> 0  (response: '— protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an ')
-  [WARN] Cannot determine label, random fallback -> 0  (response: '— protein does NOT have enzymatic activity\n        1 = Enzyme — protein is an en')
-  [WARN] Cannot determine label, random fallback -> 1  (response: '— protein does NOT have enzymatic activity\n        1 = Enzyme — protein is an en')
-  [WARN] Cannot determine label, random fallback -> 0  (response: '— protein does NOT have enzymatic activity\n        1 = Enzyme — protein is an en')
-  [WARN] Cannot determine label, random fallback -> 1  (response: 'protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an en')
-  [WARN] Cannot determine label, random fallback -> 1  (response: 'protein does NOT have enzymatic activity\n  and     1 = Enzyme — protein is an en')
- done.
+  [25-32/200] processing batch...
