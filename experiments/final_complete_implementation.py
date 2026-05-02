@@ -388,7 +388,6 @@ class TransferExperiment:
 
         # ---- 构建 RAG 预检索索引（使用当前预训练 GNN） ----
         print(f"  [RAG-Setup] Building temporary retrieval index from {source_name} ...")
-        # 暂时关闭训练模式以获取稳定的嵌入
         self.llm.gnn.eval()
         src_embs, src_labels = _encode_dataset_with_llm(self.llm, src_list, self.device)
         src_infos = []
@@ -421,6 +420,7 @@ class TransferExperiment:
             def __init__(self, indices, rag_cache):
                 self.indices = indices
                 self.rag_cache = rag_cache
+                self.labels = [int(tgt_list[idx].y.item()) for idx in indices]
             def __len__(self): return len(self.indices)
             def __getitem__(self, i):
                 idx = self.indices[i]
@@ -430,46 +430,47 @@ class TransferExperiment:
             data_list, rag_list = zip(*batch_samples)
             return PyGBatch.from_data_list(data_list), rag_list
 
+        # ---- 平衡采样逻辑 (A7: 解决 F1 低的问题) ----
+        train_dataset = RAGDataset(train_indices, train_rag_cache)
+        labels = train_dataset.labels
+        class_sample_count = np.array([len(np.where(labels == t)[0]) for t in np.unique(labels)])
+        weight = 1. / class_sample_count
+        samples_weight = np.array([weight[t] for t in labels])
+        samples_weight = torch.from_numpy(samples_weight)
+        sampler = torch.utils.data.WeightedRandomSampler(samples_weight, len(samples_weight))
+
         train_loader = torch.utils.data.DataLoader(
-            RAGDataset(train_indices, train_rag_cache), 
-            batch_size=train_batch_size, shuffle=True, collate_fn=collate_rag,
-            num_workers=4, pin_memory=(self.device == 'cuda')
+            train_dataset, 
+            batch_size=train_batch_size, sampler=sampler, collate_fn=collate_rag,
+            num_workers=0, pin_memory=(self.device == 'cuda')
         )
         val_loader = torch.utils.data.DataLoader(
             RAGDataset(val_indices, val_rag_cache), 
             batch_size=train_batch_size, shuffle=False, collate_fn=collate_rag,
-            num_workers=4, pin_memory=(self.device == 'cuda')
+            num_workers=0, pin_memory=(self.device == 'cuda')
         )
 
-        # ---- 优化器：只优化 GNN + Projector ----
+        # ---- 优化器 ----
+        optimizer = torch.optim.AdamW([
+            {"params": self.llm.gnn.parameters(), "lr": lr_gnn},
+            {"params": self.llm.projector.parameters(), "lr": lr_proj},
+        ], weight_decay=1e-5)
 
-        # ---- 训练 prompt ----
-        graph_token_str = " ".join([GRAPH_TOKEN] * self.num_graph_tokens)
-        train_prompt = (
-            f"Graph representation: {graph_token_str}\n"
-            f"Task: {prop_desc}\n"
-            f"Predict the label (0 or 1).\n"
-            f"Answer:"
-        )
-
-        # ---- 训练循环 ----
         best_val_loss = float("inf")
         best_state = None
         use_amp = self.device == "cuda"
         graph_token_placeholder = " ".join([GRAPH_TOKEN] * self.num_graph_tokens)
 
+        # ---- 训练循环 ----
         for epoch in range(1, train_epochs + 1):
-            # ---- 训练阶段 ----
             self.llm.gnn.train()
             self.llm.projector.train()
             optimizer.zero_grad()
-
             epoch_loss, n_steps = 0.0, 0
+
             for batch, rag_examples_list in train_loader:
                 batch = batch.to(self.device)
                 B = batch.num_graphs
-                
-                # 构建对齐推理阶段的 Detailed Prompt
                 prompts = []
                 for i in range(B):
                     info = extract_graph_info(batch[i], "train", target_name)
@@ -484,7 +485,6 @@ class TransferExperiment:
                     prompts.append(p)
                 
                 labels_text = [str(int(y.item())) for y in batch.y]
-
                 with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.bfloat16):
                     loss = self.llm.compute_loss(batch, prompts, labels_text)
                     loss = loss / grad_accum_steps
@@ -492,24 +492,20 @@ class TransferExperiment:
                 loss.backward()
                 n_steps += 1
                 epoch_loss += loss.item() * grad_accum_steps
-
                 if n_steps % grad_accum_steps == 0:
                     torch.nn.utils.clip_grad_norm_(self.llm.trainable_parameters(), 1.0)
                     optimizer.step()
                     optimizer.zero_grad()
 
             if n_steps % grad_accum_steps != 0:
-                torch.nn.utils.clip_grad_norm_(self.llm.trainable_parameters(), 1.0)
                 optimizer.step()
                 optimizer.zero_grad()
-
             avg_train_loss = epoch_loss / max(n_steps, 1)
 
-            # ---- 验证阶段 (增加 Autocast 和 Detailed Prompt) ----
+            # ---- 验证阶段 ----
             self.llm.gnn.eval()
             self.llm.projector.eval()
             val_loss, val_steps = 0.0, 0
-
             with torch.no_grad():
                 for batch, rag_examples_list in val_loader:
                     batch = batch.to(self.device)
@@ -528,17 +524,13 @@ class TransferExperiment:
                         prompts.append(p)
                     
                     labels_text = [str(int(y.item())) for y in batch.y]
-
                     with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.bfloat16):
                         loss = self.llm.compute_loss(batch, prompts, labels_text)
                         val_loss += loss.item()
                         val_steps += 1
 
             avg_val_loss = val_loss / max(val_steps, 1)
-
-            print(f"  Epoch {epoch}/{train_epochs}  "
-                  f"train_loss={avg_train_loss:.4f}  val_loss={avg_val_loss:.4f}",
-                  end="")
+            print(f"  Epoch {epoch}/{train_epochs}  train_loss={avg_train_loss:.4f}  val_loss={avg_val_loss:.4f}", end="")
 
             if avg_val_loss < best_val_loss:
                 best_val_loss = avg_val_loss
@@ -551,6 +543,19 @@ class TransferExperiment:
                 print()
 
         # ---- 恢复最佳权重并保存 ----
+        if best_state:
+            self.llm.gnn.load_state_dict(best_state["gnn"])
+            self.llm.projector.load_state_dict(best_state["projector"])
+            self.llm.gnn.to(self.device)
+            self.llm.projector.to(self.device)
+            Path(ckpt_proj).parent.mkdir(parents=True, exist_ok=True)
+            best_state["test_indices"] = test_indices
+            torch.save(best_state, ckpt_proj)
+            print(f"  [Joint Train] Best checkpoint saved -> {ckpt_proj} (val_loss={best_val_loss:.4f})")
+
+        self.llm.gnn.eval()
+        self.llm.projector.eval()
+        return test_indices
         if best_state:
             self.llm.gnn.load_state_dict(best_state["gnn"])
             self.llm.projector.load_state_dict(best_state["projector"])
