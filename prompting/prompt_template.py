@@ -224,110 +224,34 @@ def create_detailed_prompt(target_graph_info: Dict,
 
     parts = []
 
-    # Section 1: 角色定义
+    # 精简 prompt：直接要求输出答案，不要求思维链推理
     parts.append(
-        "You are a graph classification expert. "
-        "Your task is to predict a binary label for a target graph "
-        "using its GNN embedding representation and structurally similar "
-        "reference graphs retrieved from a related source domain.\n"
-        "IMPORTANT: Base your prediction ONLY on the GNN graph tokens provided. "
-        "Do NOT rely on dataset names or domain-specific prior knowledge."
+        "Graph binary classification. "
+        f"Predict label for the target graph. "
+        f"0 = {target_sem['label_neg']}. "
+        f"1 = {target_sem['label_pos']}."
     )
 
-    # Section 2: 标签语义定义（只告知 0/1 含义）
-    parts.append(f"\n{'='*60}")
-    parts.append("CLASSIFICATION TASK")
-    parts.append(f"{'='*60}")
-    parts.append(f"  Property : {property_description}")
-    parts.append(f"  Label 0  : {target_sem['label_neg']}")
-    parts.append(f"  Label 1  : {target_sem['label_pos']}")
-
-    # Section 3: 目标图 GNN Token（唯一图结构信息来源）
-    parts.append(f"\n{'='*60}")
-    parts.append("TARGET GRAPH — GNN EMBEDDING TOKENS")
-    parts.append(f"{'='*60}")
+    # GNN graph tokens（唯一的图结构信号）
     if graph_tokens_text:
-        parts.append(
-            "  The graph has been encoded by a pre-trained GNN encoder.\n"
-            "  The most significant embedding dimensions (L2-normalized) are:\n"
-            f"  {graph_tokens_text}\n"
-            "  Format: [dim_index:value, ...] — values reflect learned structural patterns."
-        )
-    else:
-        parts.append("  (GNN embedding not available for this graph.)")
+        parts.append(f"\nTarget graph GNN embedding: {graph_tokens_text}")
 
-    # Section 4: RAG 参考图（只给 graph token + 标签，不给统计量）
-    parts.append(f"\n{'='*60}")
-    parts.append("REFERENCE GRAPHS FROM SOURCE DOMAIN")
-    parts.append(f"{'='*60}")
-    parts.append(
-        "  These graphs come from a RELATED but DIFFERENT dataset.\n"
-        "  Use their GNN tokens to gauge structural similarity.\n"
-        "  Do NOT directly copy their labels — reason from token similarity.\n"
-        f"  Source label semantics: "
-        f"0 = {source_sem['label_neg']} | 1 = {source_sem['label_pos']}"
-    )
-    parts.append("")
-
+    # RAG 参考图（精简格式）
     if retrieved_examples:
+        parts.append(f"\nReference graphs (source: {source_sem['task']}):")
         for i, ex in enumerate(retrieved_examples[:5]):
             label = ex.get('label', '?')
             score = ex.get('retrieval_score', 0.0)
-            ref_tokens = ex.get('graph_tokens_text', None)
+            ref_tokens = ex.get('graph_tokens_text', '')
+            parts.append(f"  [{i+1}] sim={score:.3f} label={label} tokens={ref_tokens}")
 
-            if label in (0, '0'):
-                label_str = f"0 ({source_sem['label_neg']})"
-            elif label in (1, '1'):
-                label_str = f"1 ({source_sem['label_pos']})"
-            else:
-                label_str = str(label)
-
-            line = f"  [{i+1}] similarity={score:.3f}  label={label_str}"
-            if ref_tokens:
-                line += f"\n       GNN tokens: {ref_tokens}"
-            parts.append(line)
-    else:
-        parts.append("  (No reference graphs retrieved.)")
-
-    # Section 5: 推理指令
-    parts.append(f"\n{'='*60}")
-    parts.append("REASONING INSTRUCTION")
-    parts.append(f"{'='*60}")
+    # 输出格式：直接输出，不要推理
     parts.append(
-        "  Step 1 — Compare GNN tokens with reference tokens:\n"
-        "    Which references have the most similar embedding patterns?\n"
-        "    What do the shared active dimensions suggest about graph structure?"
-    )
-    parts.append(
-        f"  Step 2 — Bridge the domain gap:\n"
-        f"    References are from [{source_sem['task']}], "
-        f"but you predict [{target_sem['task']}].\n"
-        f"    Focus on structural similarity signals, not domain-specific rules."
-    )
-    parts.append(
-        "  Step 3 — Make your prediction:\n"
-        "    Based on GNN token similarity and reference labels, decide the label."
-    )
-
-    # Section 6: 输出格式
-    parts.append(f"\n{'='*60}")
-    parts.append("OUTPUT FORMAT  (strictly follow)")
-    parts.append(f"{'='*60}")
-    parts.append(
-        "  You may reason freely above. But your FINAL LINE must be exactly:\n"
-        "\n"
-        "      Answer: 0\n"
-        "  or\n"
-        "      Answer: 1\n"
-        "\n"
-        f"  where  0 = {target_sem['label_neg']}\n"
-        f"         1 = {target_sem['label_pos']}\n"
-        "\n"
-        "  The parser only reads 'Answer: <digit>'. Any other format causes an error."
+        "\nDo NOT explain. Respond with ONLY:\nAnswer: 0\nor\nAnswer: 1"
     )
 
     if include_target_label and target_label is not None:
-        parts.append(f"\n  [DEBUG] Ground truth = {target_label}")
+        parts.append(f"\n[DEBUG] Ground truth = {target_label}")
 
     return "\n".join(parts)
 
@@ -348,90 +272,24 @@ def create_no_rag_prompt(target_graph_info: Dict,
 
     parts = []
 
+    # 精简 No-RAG prompt：直接要求输出答案
     parts.append(
-        "You are an expert in graph-based machine learning and graph "
-        "classification. Your task is to predict a label for a target graph "
-        "based on its GNN embedding and structural properties."
+        "Graph binary classification. "
+        f"Predict label for the target graph. "
+        f"0 = {target_sem['label_neg']}. "
+        f"1 = {target_sem['label_pos']}."
     )
 
-    # GNN Embedding Token Section（与 Full-RAG prompt 一致的 soft token 注入点）
-    parts.append(f"\n{'='*60}")
-    parts.append("TARGET GRAPH — GNN EMBEDDING TOKENS")
-    parts.append(f"{'='*60}")
+    # GNN graph tokens
     if graph_tokens_text:
-        parts.append(
-            "  The graph has been encoded by a pre-trained GNN encoder.\n"
-            "  The most significant embedding dimensions (L2-normalized) are:\n"
-            f"  {graph_tokens_text}\n"
-            "  Format: [dim_index:value, ...] — values reflect learned structural patterns."
-        )
-    else:
-        parts.append("  (GNN embedding not available for this graph.)")
+        parts.append(f"\nTarget graph GNN embedding: {graph_tokens_text}")
 
-    parts.append(f"\n{'='*60}")
-    parts.append(f"TARGET GRAPH  (Task: {target_sem['task']})")
-    parts.append(f"{'='*60}")
-    parts.append(f"  Graph ID   : {target_graph_info.get('graph_id', 'N/A')}")
-    parts.append(f"  Num Nodes  : {target_graph_info.get('num_nodes', 'N/A')}")
-    parts.append(f"  Num Edges  : {target_graph_info.get('num_edges', 'N/A')}")
-    parts.append(f"  Avg Degree : {target_graph_info.get('avg_degree', 'N/A')}")
-    if 'density' in target_graph_info:
-        parts.append(f"  Density    : {target_graph_info['density']:.4f}")
-    if 'feature_summary' in target_graph_info:
-        parts.append(f"  Features   : {target_graph_info['feature_summary']}")
-    parts.append(f"  Predict    : {property_description}  "
-                 f"(0 = {target_sem['label_neg']} | 1 = {target_sem['label_pos']})")
-    parts.append(f"  Key signals: {target_sem['key_features']}")
+    # No-RAG 无参考图
+    parts.append("\nNo reference graphs available.")
 
-    assay_context = target_sem.get('assay_context')
-    if assay_context:
-        parts.append(f"\n{'='*60}")
-        parts.append("TASK DEFINITION CLARIFICATION")
-        parts.append(f"{'='*60}")
-        parts.append(assay_context)
-
-    parts.append(f"\n{'='*60}")
-    parts.append("REFERENCE GRAPHS  [ABLATION: No RAG retrieval]")
-    parts.append(f"{'='*60}")
+    # 输出格式：直接输出，不要推理
     parts.append(
-        "  No reference graphs are provided in this ablation condition.\n"
-        "  Please rely on the GNN embedding tokens and the structural\n"
-        "  properties of the target graph for your prediction."
-    )
-
-    parts.append(f"\n{'='*60}")
-    parts.append("REASONING INSTRUCTION  [Zero-shot]")
-    parts.append(f"{'='*60}")
-    parts.append(
-        "  Step 1 — Analyse the GNN embedding tokens:\n"
-        "    Examine the activated dimensions and their values.\n"
-        "    What structural patterns do they suggest?"
-    )
-    parts.append(
-        f"  Step 2 — Apply domain knowledge:\n"
-        f"    Based on known structure–property relationships for\n"
-        f"    [{target_sem['task']}], reason whether the graph features\n"
-        f"    indicate {property_description}."
-    )
-    parts.append(
-        f"  Step 3 — Make your prediction:\n"
-        f"    Decide the most likely label."
-    )
-
-    parts.append(f"\n{'='*60}")
-    parts.append("OUTPUT FORMAT  (strictly follow)")
-    parts.append(f"{'='*60}")
-    parts.append(
-        "  You may reason freely above. But your FINAL LINE must be exactly:\n"
-        "\n"
-        "      Answer: 0\n"
-        "  or\n"
-        "      Answer: 1\n"
-        "\n"
-        f"  where  0 = {target_sem['label_neg']}\n"
-        f"         1 = {target_sem['label_pos']}\n"
-        "\n"
-        "  The parser only reads 'Answer: <digit>'. Any other format causes an error."
+        "\nDo NOT explain. Respond with ONLY:\nAnswer: 0\nor\nAnswer: 1"
     )
 
     return "\n".join(parts)

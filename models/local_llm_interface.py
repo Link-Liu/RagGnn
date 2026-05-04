@@ -172,7 +172,7 @@ class LocalLLMInterface:
         gnn_hidden_dim: int = 128,     # GNN 隐层维度
         gnn_num_layers: int = 4,       # GNN 层数
         num_graph_tokens: int = 8,     # 每图注入的 soft token 数
-        max_new_tokens: int = 128,     # 生成时最大新 token 数（32 太小，LLM 来不及输出 Answer）
+        max_new_tokens: int = 16,      # 不需要思维链，只需 "Answer: 0/1"，16 token 足够
         device: str = "auto",
         load_in_8bit: bool = False,    # 是否用 8-bit 量化节省显存
         modelscope_cache_dir: Optional[str] = None,
@@ -409,12 +409,18 @@ class LocalLLMInterface:
             input_ids, self.graph_token_id, self.num_graph_tokens,
         )
 
+        # 获取换行符 token id，用于在输出 "Answer: X" 后立即停止生成
+        newline_token_ids = self.tokenizer.encode("\n", add_special_tokens=False)
+        stop_ids = [self.tokenizer.eos_token_id] + newline_token_ids
+
         out_ids = self.llm.generate(
             inputs_embeds=input_embeds,
             attention_mask=attention_mask,
             max_new_tokens=max_new_tokens,
             do_sample=False,
+            repetition_penalty=1.5,       # 防止重复生成 0/1 数字串
             pad_token_id=self.tokenizer.eos_token_id,
+            eos_token_id=stop_ids,         # 遇到换行或 EOS 立即停止
         )
         # 只解码新生成的 token（去掉 prompt 部分），
         # 防止 prompt 中的文本（如 'label 0'、'label 1'）干扰预测解析
@@ -446,27 +452,25 @@ class LocalLLMInterface:
                 prediction = int(match.group(1))
                 confidence = 1.0
             else:
-                # 回退策略：搜索最后出现的 0 或 1
-                digits = re.findall(r'[01]', content[-50:])
-                if digits:
-                    prediction = int(digits[-1])
-                    confidence = 0.5
-                    print(f"  [WARN] No 'Answer: X' found, fallback to last digit -> {prediction}  (response: {content[-60:]!r})")
-                else:
-                    # 最终回退：搜索整个文本中 '1' 和 '0' 出现次数
-                    cnt_0 = content.lower().count('label 0') + content.lower().count('class 0')
-                    cnt_1 = content.lower().count('label 1') + content.lower().count('class 1')
-                    if cnt_1 > cnt_0:
-                        prediction = 1
-                        print(f"  [WARN] No digit found, inferred label=1 from keyword counts (label_1={cnt_1}, label_0={cnt_0})")
-                    elif cnt_0 > cnt_1:
-                        prediction = 0
-                        print(f"  [WARN] No digit found, inferred label=0 from keyword counts (label_0={cnt_0}, label_1={cnt_1})")
+                # 检测重复数字模式（如 '000000...' 或 '111111...'）
+                # 这种情况下用第一个数字作为预测
+                only_digits = re.sub(r'[^01]', '', content)
+                if len(only_digits) >= 3:
+                    # 重复模式：取首个数字
+                    prediction = int(only_digits[0])
+                    confidence = 0.6
+                    if len(only_digits) > 5:
+                        print(f"  [WARN] Repetitive digit pattern detected, using first digit -> {prediction}  (len={len(only_digits)})")
                     else:
-                        # 真的无法判断时，用随机预测避免系统性偏向 majority class
-                        prediction = np.random.randint(0, 2)
-                        print(f"  [WARN] Cannot determine label, random fallback -> {prediction}  (response: {content[:80]!r})")
+                        print(f"  [WARN] No 'Answer: X' found, fallback to first digit -> {prediction}  (response: {content[:60]!r})")
+                elif only_digits:
+                    prediction = int(only_digits[0])
+                    confidence = 0.5
+                    print(f"  [WARN] No 'Answer: X' found, fallback -> {prediction}  (response: {content[:60]!r})")
+                else:
+                    prediction = np.random.randint(0, 2)
                     confidence = 0.1
+                    print(f"  [WARN] Cannot determine label, random fallback -> {prediction}  (response: {content[:80]!r})")
             
             batch_results.append({
                 'prediction': prediction,
