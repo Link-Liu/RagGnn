@@ -260,6 +260,10 @@ class LocalLLMInterface:
             param.requires_grad = False
         print("[LLM] All LLM parameters FROZEN.")
 
+        # ---- 开启 Gradient Checkpointing，用时间换显存 ----
+        self.llm.gradient_checkpointing_enable()
+        print("[LLM] Gradient checkpointing ENABLED (saves ~60-70% activation memory).")
+
         llm_dim = self.llm.config.hidden_size
 
         # ---- GNN Encoder（可训练）----
@@ -376,6 +380,7 @@ class LocalLLMInterface:
             inputs_embeds=full_embeds,
             attention_mask=full_mask,
             labels=labels,
+            use_cache=False,  # 训练时不需要 KV cache，节省显存
         )
         return outputs.loss
 
