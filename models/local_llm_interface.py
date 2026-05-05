@@ -84,7 +84,7 @@ class GINEncoder(nn.Module):
 # ============================================================
 class GraphProjector(nn.Module):
     """参考 GraphPrompter 的 Projector 架构：Linear → Sigmoid → Linear"""
-    def __init__(self, gnn_dim: int, llm_dim: int, num_tokens: int = 1):
+    def __init__(self, gnn_dim: int, llm_dim: int, num_tokens: int = 8):
         super().__init__()
         self.num_tokens = num_tokens
         self.llm_dim = llm_dim
@@ -106,55 +106,6 @@ class GraphProjector(nn.Module):
         return out.view(B, self.num_tokens, self.llm_dim)
 
 
-# ============================================================
-# Soft Token 注入
-# ============================================================
-def inject_graph_tokens(
-    input_embeds: torch.Tensor,      # [B, seq_len, llm_dim]
-    soft_tokens: torch.Tensor,       # [B, num_tokens, llm_dim]
-    input_ids: torch.Tensor,         # [B, seq_len]
-    graph_token_id: int,
-    num_graph_tokens: int,
-) -> torch.Tensor:
-    """
-    将 input_embeds 中前 num_graph_tokens 个 graph_token_id 位置
-    替换为 soft_tokens。
-    """
-    B, L, D = input_embeds.shape
-    
-    # 找到所有 graph_token_id 的位置
-    mask = (input_ids == graph_token_id)
-    num_found = mask.sum().item()
-    
-    # 如果根本没找到占位符（例如在消融实验 No-RAG 模式下），直接返回原 embedding
-    if num_found == 0:
-        return input_embeds
-
-    # 获取索引
-    batch_idx, pos_idx = torch.where(mask)
-    
-    # 安全检查：如果找到的数量不是预期的 B * num_graph_tokens，
-    # 说明某些 prompt 占位符不对，回退到循环处理以保证健壮性
-    if num_found != B * num_graph_tokens:
-        out = input_embeds.clone()
-        # 确保类型一致
-        soft_tokens = soft_tokens.to(out.dtype)
-        for b in range(B):
-            b_mask = (input_ids[b] == graph_token_id)
-            b_pos = b_mask.nonzero(as_tuple=True)[0]
-            # 取前 num_graph_tokens 个进行替换
-            for k, pos in enumerate(b_pos[:num_graph_tokens]):
-                out[b, pos, :] = soft_tokens[b, k, :]
-        return out
-
-    # 理想情况：使用向量化加速
-    batch_idx = batch_idx.view(B, num_graph_tokens)
-    pos_idx = pos_idx.view(B, num_graph_tokens)
-
-    out = input_embeds.clone()
-    # 核心修复：确保赋值时类型一致 (BFloat16 vs Float32)
-    out[batch_idx, pos_idx] = soft_tokens.to(out.dtype)
-    return out
 
 
 # ============================================================
@@ -164,8 +115,8 @@ class LocalLLMInterface:
     """
     基于 ModelScope 的本地 LLM 接口。
 
-    LLM 参数完全冻结，只训练 GNN Encoder + Graph Projector。
-    提示词中的 <graph_token> 在前向时被 GNN soft embedding 替换。
+    LLM 参数完全冻结，只训练 GNN Encoder + Graph Projector + Classifier Head。
+    Graph tokens 通过 concat 注入到序列头部（GraphPrompter 风格）。
     """
 
     def __init__(
@@ -174,7 +125,7 @@ class LocalLLMInterface:
         num_node_features: int,        # GNN 输入节点特征维度
         gnn_hidden_dim: int = 128,     # GNN 隐层维度
         gnn_num_layers: int = 4,       # GNN 层数
-        num_graph_tokens: int = 1,     # 参考 GraphPrompter，只需 1 个 soft token
+        num_graph_tokens: int = 8,     # 每图注入的 soft token 数
         max_new_tokens: int = 16,      # 不需要思维链，只需 "Answer: 0/1"，16 token 足够
         device: str = "auto",
         load_in_8bit: bool = False,    # 是否用 8-bit 量化节省显存
@@ -226,9 +177,8 @@ class LocalLLMInterface:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         self.tokenizer.padding_side = "left"
 
-        # 注册 <graph_token> 特殊 token
-        self.tokenizer.add_tokens([GRAPH_TOKEN], special_tokens=True)
-        self.graph_token_id = self.tokenizer.convert_tokens_to_ids(GRAPH_TOKEN)
+        # 注：<graph_token> 注册已废弃（改用 concat 注入），保留以兼容旧代码引用
+        # self.tokenizer.add_tokens([GRAPH_TOKEN], special_tokens=True)
 
         # ---- LLM ----
         print(f"[LLM] Loading model from: {self.model_dir} to {self.device}")
@@ -258,10 +208,6 @@ class LocalLLMInterface:
             print("[LLM] WARNING: Model is on CPU but CUDA is requested! Attempting force move...")
             self.llm = self.llm.to(self.device)
 
-        # 扩展 embedding 层（因为新增了 <graph_token>）
-        if not hasattr(self.llm, "resize_token_embeddings"):
-            raise RuntimeError("Loaded ModelScope model does not support token embedding resize.")
-        self.llm.resize_token_embeddings(len(self.tokenizer))
 
         # ---- 冻结 LLM 全部参数 ----
         for param in self.llm.parameters():
@@ -288,12 +234,21 @@ class LocalLLMInterface:
             num_tokens=num_graph_tokens,
         ).to(self.device)
 
+        # ---- 分类头（辅助 loss，直接从 GNN embedding 做二分类）----
+        # 解决“生成式 loss 信号穿不透冻结 LLM”的问题
+        self.classifier_head = nn.Sequential(
+            nn.Linear(gnn_hidden_dim, gnn_hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(gnn_hidden_dim, 2),
+        ).to(self.device)
+
         print(f"[GNN] node_feat={num_node_features}, hidden={gnn_hidden_dim}, "
               f"layers={gnn_num_layers}, graph_tokens={num_graph_tokens}")
 
         trainable = sum(p.numel() for p in self.trainable_parameters())
         total_llm = sum(p.numel() for p in self.llm.parameters())
-        print(f"[Params] Trainable (GNN+Proj): {trainable:,} | "
+        print(f"[Params] Trainable (GNN+Proj+ClsHead): {trainable:,} | "
               f"Frozen (LLM): {total_llm:,} | "
               f"Ratio: {100*trainable/(total_llm+trainable):.3f}%")
 
@@ -301,7 +256,9 @@ class LocalLLMInterface:
     # 可训练参数
     # ----------------------------------------------------------
     def trainable_parameters(self):
-        return list(self.gnn.parameters()) + list(self.projector.parameters())
+        return (list(self.gnn.parameters()) 
+                + list(self.projector.parameters())
+                + list(self.classifier_head.parameters()))
 
     # ----------------------------------------------------------
     # 图编码
@@ -346,11 +303,13 @@ class LocalLLMInterface:
         pyg_batch,
         prompts: List[str],
         labels_text: List[str],
+        cls_weight: float = 0.7,
+        gen_weight: float = 0.3,
     ) -> torch.Tensor:
         """
-        融合 GraphPrompter 的 concat 注入 + Instruct 模型的 chat template。
-        [BOS] + [graph_tokens] + [chat_template(prompt)] + [label + EOS]
-        只对 label 位置计算 cross-entropy loss。
+        混合 loss：分类头直接 loss + 生成式 loss。
+        分类 loss 直接作用于 GNN+Projector，不需要穿透冻结 LLM。
+        生成式 loss 让 soft token 在 LLM 空间中学习有意义的表示。
         """
         B = pyg_batch.num_graphs
 
@@ -358,16 +317,23 @@ class LocalLLMInterface:
         graph_emb = self._encode_graph(pyg_batch)          # [B, hidden]
         soft_tokens = self._get_soft_tokens(graph_emb)     # [B, num_tok, llm_dim]
 
-        # 2. 用 chat template 包装后 tokenize（不加 special tokens，BOS 手动加）
+        # ========== 分类头 loss（强信号，直接训练 GNN）==========
+        cls_logits = self.classifier_head(graph_emb)       # [B, 2]
+        cls_labels = torch.tensor(
+            [int(l) for l in labels_text], device=self.device, dtype=torch.long
+        )
+        cls_loss = nn.functional.cross_entropy(cls_logits, cls_labels)
+
+        # ========== 生成式 loss（弱信号，让 soft token 在 LLM 空间有意义）==========
+        # 2. 用 chat template 包装后 tokenize
         wrapped = self._wrap_chat_template(prompts)
         text_enc = self.tokenizer(wrapped, add_special_tokens=False)
         label_enc = self.tokenizer(labels_text, add_special_tokens=False)
 
         # 3. 获取特殊 token 的 embedding
         embed_fn = self.llm.get_input_embeddings()
-        bos_embed = embed_fn(torch.tensor([self.tokenizer.bos_token_id], device=self.device))  # [1, D]
-        pad_embed = embed_fn(torch.tensor([self.tokenizer.pad_token_id], device=self.device))  # [1, D]
-        # 统一 dtype：Projector 输出 Float32，LLM embedding 输出 BFloat16
+        bos_embed = embed_fn(torch.tensor([self.tokenizer.bos_token_id], device=self.device))
+        pad_embed = embed_fn(torch.tensor([self.tokenizer.pad_token_id], device=self.device))
         soft_tokens = soft_tokens.to(bos_embed.dtype)
 
         # 4. 逐样本手动拼接 embeddings
@@ -376,19 +342,14 @@ class LocalLLMInterface:
         batch_label_ids = []
 
         for i in range(B):
-            # label: label_tokens + EOS
             label_ids_i = label_enc.input_ids[i] + [self.tokenizer.eos_token_id]
-            # text: prompt tokens + label tokens
             text_ids_i = text_enc.input_ids[i][:self.max_txt_len] + label_ids_i
-
             text_embeds = embed_fn(torch.tensor(text_ids_i, device=self.device))
-            # 拼接: [BOS] + [graph_tokens] + [text + label]
             seq_embeds = torch.cat([bos_embed, soft_tokens[i], text_embeds], dim=0)
 
             batch_inputs_embeds.append(seq_embeds)
             batch_attention_mask.append([1] * seq_embeds.shape[0])
 
-            # Label: prompt 部分用 -100 忽略，label 部分参与 loss
             n_ignore = seq_embeds.shape[0] - len(label_ids_i)
             label_for_loss = [-100] * n_ignore + label_ids_i
             batch_label_ids.append(label_for_loss)
@@ -414,7 +375,11 @@ class LocalLLMInterface:
             return_dict=True,
             use_cache=False,
         )
-        return outputs.loss
+        gen_loss = outputs.loss
+
+        # ========== 混合 loss ==========
+        total_loss = cls_weight * cls_loss + gen_weight * gen_loss
+        return total_loss
 
     # ----------------------------------------------------------
     # 推理（generate）
@@ -555,6 +520,10 @@ class LocalLLMInterface:
             self.projector.cpu()
             del self.projector
             self.projector = None
+        if hasattr(self, 'classifier_head') and self.classifier_head is not None:
+            self.classifier_head.cpu()
+            del self.classifier_head
+            self.classifier_head = None
         self._label_cache.clear()
         gc.collect()
         if torch.cuda.is_available():
@@ -575,6 +544,7 @@ class LocalLLMInterface:
         torch.save({
             'gnn': self.gnn.state_dict(),
             'projector': self.projector.state_dict(),
+            'classifier_head': self.classifier_head.state_dict(),
         }, path)
         print(f"[Checkpoint] Saved -> {path}")
 
@@ -585,5 +555,8 @@ class LocalLLMInterface:
         ckpt = torch.load(path, map_location=self.device)
         self.gnn.load_state_dict(ckpt['gnn'])
         self.projector.load_state_dict(ckpt['projector'])
+        # 兼容旧 checkpoint（没有 classifier_head）
+        if 'classifier_head' in ckpt:
+            self.classifier_head.load_state_dict(ckpt['classifier_head'])
         print(f"[Checkpoint] Loaded <- {path}")
         return True

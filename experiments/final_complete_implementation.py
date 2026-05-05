@@ -39,8 +39,7 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from models.gnn_encoder import GNNEncoder
-from models.local_llm_interface import LocalLLMInterface, GRAPH_TOKEN
+from models.local_llm_interface import LocalLLMInterface
 from retrieval.domain_aware_retriever import GraphRetriever
 from prompting.prompt_template import create_detailed_prompt, create_no_rag_prompt
 from dataset.mol_graph_utils import (
@@ -62,144 +61,7 @@ MODELSCOPE_CACHE_DIR = os.getenv('MODELSCOPE_CACHE_DIR', _DEFAULT_MS_CACHE_DIR)
 MODELSCOPE_REVISION = os.getenv('MODELSCOPE_REVISION', 'master')
 
 
-# ---------------------------------------------------------------------------
-# GNN Embedding Engine (图级别嵌入)
-# ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Graph Token 序列化：将 GNN 嵌入转换为提示词中的文本 token
-# ---------------------------------------------------------------------------
-
-# 每个图在提示词中保留的嵌入维度数（取最显著的前 N 维）
-GRAPH_TOKEN_TOP_K = 16
-
-
-def serialize_graph_tokens(embedding: np.ndarray, top_k: int = GRAPH_TOKEN_TOP_K) -> str:
-    """
-    将 L2 归一化的 GNN 嵌入向量序列化为文本 token 字符串，
-    只取绝对值最大的 top_k 维，格式为:
-      [idx:val, idx:val, ...]
-        供冻结 LLM 在文本提示词中理解图的连续特征表示。
-    """
-    top_k = min(top_k, len(embedding))
-    top_indices = np.argsort(np.abs(embedding))[::-1][:top_k]
-    top_indices_sorted = np.sort(top_indices)
-    tokens = [f"{i}:{embedding[i]:+.3f}" for i in top_indices_sorted]
-    return "[" + ", ".join(tokens) + "]"
-
-
-class GNNEmbeddingEngine:
-    """
-    使用 GINEncoder 为图数据集产生图级别嵌入，
-    并支持将嵌入序列化为提示词 graph token 文本。
-    """
-
-    def __init__(self, num_node_features: int, num_edge_features: int = 0,
-                 hidden_dim: int = 64, num_layers: int = 3, device: str = 'cpu'):
-        self.device = torch.device(device)
-        self.hidden_dim = hidden_dim
-        self.num_node_features = num_node_features
-
-        self.encoder = GNNEncoder(
-            num_node_features=num_node_features,
-            num_edge_features=num_edge_features,
-            hidden_dim=hidden_dim,
-            num_layers=num_layers,
-        ).to(self.device)
-        self.encoder.eval()
-        print(f"[GNN] Initialized: node_feat={num_node_features}, "
-              f"edge_feat={num_edge_features}, hidden={hidden_dim}, layers={num_layers}")
-
-    def train_on_dataset(self, dataset, epochs: int = 30,
-                         batch_size: int = 32, lr: float = 1e-3,
-                         checkpoint_path: Optional[str] = None) -> None:
-        """在数据集上有监督地训练 GNN encoder（图分类任务）。LLM 天然冻结。"""
-        print(f"[GNN-Train] Training on {len(dataset)} graphs, {epochs} epochs ...")
-        classifier = nn.Linear(self.hidden_dim, 1).to(self.device)
-        optimizer = torch.optim.Adam(
-            list(self.encoder.parameters()) + list(classifier.parameters()),
-            lr=lr, weight_decay=1e-5
-        )
-        criterion = nn.BCEWithLogitsLoss()
-        
-        # A5: DataLoader 参数调优
-        # 兼容 device 为字符串或 torch.device 对象
-        use_cuda = (self.device == 'cuda' or (isinstance(self.device, torch.device) and self.device.type == 'cuda'))
-        loader = DataLoader(
-            list(dataset), 
-            batch_size=batch_size, 
-            shuffle=True,
-            num_workers=0, # Windows 下 num_workers > 0 易出错，保持 0 但开启 pin_memory
-            pin_memory=use_cuda
-        )
-
-        self.encoder.train()
-        best_loss = float('inf')
-        for epoch in range(1, epochs + 1):
-            total_loss = 0.0
-            count = 0
-            for batch in loader:
-                batch = batch.to(self.device)
-                optimizer.zero_grad()
-                emb = self.encoder(batch.x, batch.edge_index, batch.edge_attr, batch.batch)
-                logit = classifier(emb).squeeze(-1)
-                loss = criterion(logit, batch.y.float())
-                loss.backward()
-                optimizer.step()
-                total_loss += loss.item() * batch.num_graphs
-                count += batch.num_graphs
-            avg_loss = total_loss / max(count, 1)
-            if avg_loss < best_loss:
-                best_loss = avg_loss
-            if epoch % 5 == 0 or epoch == 1:
-                print(f"  Epoch {epoch:3d}/{epochs}  loss={avg_loss:.4f}  best={best_loss:.4f}")
-
-        self.encoder.eval()
-        del classifier
-        print(f"[GNN-Train] Done. Best loss={best_loss:.4f}")
-
-        if checkpoint_path:
-            Path(checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
-            torch.save(self.encoder.state_dict(), checkpoint_path)
-            print(f"[GNN-Train] Saved to {checkpoint_path}")
-
-    def load_checkpoint(self, checkpoint_path: str) -> bool:
-        p = Path(checkpoint_path)
-        if not p.exists():
-            return False
-        self.encoder.load_state_dict(
-            torch.load(checkpoint_path, map_location=self.device)
-        )
-        self.encoder.eval()
-        print(f"[GNN] Loaded weights from {checkpoint_path}")
-        return True
-
-    @torch.no_grad()
-    def encode_graph(self, data) -> np.ndarray:
-        """编码单个图，返回 L2 归一化嵌入。"""
-        data = data.to(self.device)
-        emb = self.encoder(data.x, data.edge_index, data.edge_attr)
-        emb = emb.cpu().numpy().flatten()
-        norm = np.linalg.norm(emb)
-        if norm > 0:
-            emb = emb / norm
-        return emb
-
-    @torch.no_grad()
-    def encode_dataset(self, dataset) -> Tuple[List[np.ndarray], List[int]]:
-        """编码整个数据集，返回 (embeddings, labels)。"""
-        embeddings = []
-        labels = []
-        for data in dataset:
-            emb = self.encode_graph(data)
-            embeddings.append(emb)
-            labels.append(data.y.item())
-        return embeddings, labels
-
-    def get_graph_token_text(self, data) -> str:
-        """编码单个图并返回序列化 graph token 文本，用于插入提示词。"""
-        emb = self.encode_graph(data)
-        return serialize_graph_tokens(emb)
 
 
 # ---------------------------------------------------------------------------
@@ -550,6 +412,7 @@ class TransferExperiment:
                 best_state = {
                     "gnn": {k: v.cpu().clone() for k, v in self.llm.gnn.state_dict().items()},
                     "projector": {k: v.cpu().clone() for k, v in self.llm.projector.state_dict().items()},
+                    "classifier_head": {k: v.cpu().clone() for k, v in self.llm.classifier_head.state_dict().items()},
                 }
                 print(f"  ← best ✓")
             else:
@@ -563,8 +426,10 @@ class TransferExperiment:
         if best_state:
             self.llm.gnn.load_state_dict(best_state["gnn"])
             self.llm.projector.load_state_dict(best_state["projector"])
+            self.llm.classifier_head.load_state_dict(best_state["classifier_head"])
             self.llm.gnn.to(self.device)
             self.llm.projector.to(self.device)
+            self.llm.classifier_head.to(self.device)
             Path(ckpt_proj).parent.mkdir(parents=True, exist_ok=True)
             best_state["test_indices"] = test_indices
             torch.save(best_state, ckpt_proj)
@@ -572,6 +437,7 @@ class TransferExperiment:
 
         self.llm.gnn.eval()
         self.llm.projector.eval()
+        self.llm.classifier_head.eval()
         return test_indices
 
     def run_transfer(self, source_name: str, target_name: str,
@@ -998,7 +864,7 @@ def main():
         llm_path=MODELSCOPE_MODEL_ID,
         modelscope_cache_dir=MODELSCOPE_CACHE_DIR,
         modelscope_revision=MODELSCOPE_REVISION,
-        num_graph_tokens=1,        # 减少到 1（参考 GraphPrompter），减轻 projector 负担
+        num_graph_tokens=8,        # 8 个 soft token，增加图信息容量
         load_in_8bit=True,         # 8-bit 量化：LLM 显存 ~16GB→~8GB，防止溢出到共享内存
     )
 
