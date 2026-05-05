@@ -3,8 +3,8 @@
   Domain-Aware RAG-MDA — Graph Transfer Learning + Ablation
   LLM Backend: ModelScope (frozen, soft graph token injection)
 ============================================================
-[Init] device=cuda, llm=LLM-Research/Meta-Llama-3.1-8B
-
+============================================================
+  Transfer: PROTEINS -> DD  (sample=200, batch=8)
 ============================================================
   Transfer: PROTEINS -> DD  (sample=200, batch=8)
 ============================================================
@@ -13,328 +13,163 @@
 [LLM] Initializing LocalLLMInterface (node_feat=89) ...
 [LLM] Downloading from ModelScope: LLM-Research/Meta-Llama-3.1-8B (cache_dir=D:\LCY\RagGnn\checkpoints\modelscope, revision=master)
 Downloading Model from https://www.modelscope.cn to directory: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B
-2026-05-02 14:31:20,046 - modelscope - INFO - Creating symbolic link [D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B].
-2026-05-02 14:31:20,046 - modelscope - WARNING - Failed to create symbolic link D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B for D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B.
+2026-05-04 10:10:01,680 - modelscope - INFO - Creating symbolic link [D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B].
+2026-05-04 10:10:01,680 - modelscope - WARNING - Failed to create symbolic link D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B for D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B.
 [LLM] Loading tokenizer from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B
 [LLM] Loading model from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B to cuda
 [transformers] `torch_dtype` is deprecated! Use `dtype` instead!
-Loading weights: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 291/291 [00:05<00:00, 56.03it/s]
+Loading weights: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 291/291 [00:05<00:00, 56.72it/s] 
+[LLM] Model actually loaded on: cuda:0
+[transformers] The new embeddings will be initialized from a multivariate normal distribution that has old embeddings' mean and covariance. As described in this article: https://nlp.stanford.edu/~johnhew/vocab-expansion.html. To disable this, use `2026-05-04 10:10:01,680 - modelscope - WARNING - Failed to create symbolic link D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B for D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B.
+[LLM] Loading tokenizer from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B
+[LLM] Loading model from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B to cuda
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 291/291 [00:05<00:00, 56.72it/s] 
+[LLM] Model actually loaded on: cuda:0
+[transformers] The new embeddings will be initialized from a multivariate normal distribution that has old embeddings' mean and covariance. As described in this article: https://nlp.stanford.edu/~johnhew/vocab-expansion.html. To disable this, use `[LLM] Loading tokenizer from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B
+[LLM] Loading model from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B to cuda
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 291/291 [00:05<00:00, 56.72it/s] 
 [LLM] Model actually loaded on: cuda:0
 [transformers] The new embeddings will be initialized from a multivariate normal distribution that has old embeddings' mean and covariance. As described in this article: https://nlp.stanford.edu/~johnhew/vocab-expansion.html. To disable this, use `mean_resizing=False`
 [transformers] The new lm_head weights will be initialized from a multivariate normal distribution that has old embeddings' mean and covariance. As described in this article: https://nlp.stanford.edu/~johnhew/vocab-expansion.html. To disable this, use `mean_resizing=False`
 [LLM] All LLM parameters FROZEN.
+[LLM] Gradient checkpointing ENABLED (saves ~60-70% activation memory).
+[LLM] Gradient checkpointing ENABLED (saves ~60-70% activation memory).
 [GNN] node_feat=89, hidden=128, layers=4, graph_tokens=8
 [Params] Trainable (GNN+Proj): 269,653,120 | Frozen (LLM): 8,030,269,440 | Ratio: 3.249%
-[GNN-Pretrain] Training on 1113 graphs, 50 epochs ...
-[Params] Trainable (GNN+Proj): 269,653,120 | Frozen (LLM): 8,030,269,440 | Ratio: 3.249%
-[GNN-Pretrain] Training on 1113 graphs, 50 epochs ...
-  Epoch   1/50  loss=0.6954  best=0.6954
-[GNN-Pretrain] Training on 1113 graphs, 50 epochs ...
-  Epoch   1/50  loss=0.6954  best=0.6954
-  Epoch   5/50  loss=0.5986  best=0.5986
-  Epoch  10/50  loss=0.5820  best=0.5763
-  Epoch   1/50  loss=0.6954  best=0.6954
-  Epoch   5/50  loss=0.5986  best=0.5986
-  Epoch  10/50  loss=0.5820  best=0.5763
-  Epoch  15/50  loss=0.5691  best=0.5629
-  Epoch   5/50  loss=0.5986  best=0.5986
-  Epoch  10/50  loss=0.5820  best=0.5763
-  Epoch  15/50  loss=0.5691  best=0.5629
-  Epoch  20/50  loss=0.5564  best=0.5530
-  Epoch  15/50  loss=0.5691  best=0.5629
-  Epoch  20/50  loss=0.5564  best=0.5530
-  Epoch  20/50  loss=0.5564  best=0.5530
-  Epoch  25/50  loss=0.5336  best=0.5336
-  Epoch  30/50  loss=0.5297  best=0.5200
-  Epoch  30/50  loss=0.5297  best=0.5200
-  Epoch  35/50  loss=0.5176  best=0.5176
-  Epoch  35/50  loss=0.5176  best=0.5176
-  Epoch  40/50  loss=0.5234  best=0.5102
-  Epoch  40/50  loss=0.5234  best=0.5102
-  Epoch  45/50  loss=0.5030  best=0.4860
-  Epoch  50/50  loss=0.4962  best=0.4860
-  Epoch  50/50  loss=0.4962  best=0.4860
-[GNN-Pretrain] Done. best_loss=0.4860
-[GNN-Pretrain] Done. best_loss=0.4860
-[GNN-Pretrain] Saved -> checkpoints/gnn_proteins.pt
-[GNN-Pretrain] Saved -> checkpoints/gnn_proteins.pt
+[GNN-Pretrain] Loaded from checkpoints/gnn_proteins.pt
 
 ============================================================
   [Joint Train] GNN + Projector (RAG-Augmented) (PROTEINS -> DD)
   Train epochs=15, lr_gnn=5e-05, lr_proj=0.0002
-  [Joint Train] GNN + Projector (RAG-Augmented) (PROTEINS -> DD)
-  Train epochs=15, lr_gnn=5e-05, lr_proj=0.0002
 ============================================================
-  Train: 753, Val: 188, Test: 237 (held-out for evaluation)
-  Train epochs=15, lr_gnn=5e-05, lr_proj=0.0002
-============================================================
-  Train: 753, Val: 188, Test: 237 (held-out for evaluation)
-============================================================
-  Train: 753, Val: 188, Test: 237 (held-out for evaluation)
   Train: 753, Val: 188, Test: 237 (held-out for evaluation)
   [RAG-Setup] Building temporary retrieval index from PROTEINS ...
   [RAG-Setup] Pre-retrieving for 753 samples ...
   [RAG-Setup] Pre-retrieving for 188 samples ...
-  Epoch 1/15  train_loss=5.2482  val_loss=2.6370  ← best ✓
-  Epoch 2/15  train_loss=0.9872  val_loss=1.0313  ← best ✓
-  Epoch 3/15  train_loss=0.7270  val_loss=0.6683  ← best ✓
-  Epoch 4/15  train_loss=0.6647  val_loss=0.6152  ← best ✓
-  Epoch 5/15  train_loss=0.6054  val_loss=0.7188  (patience 1/5)
-  Epoch 6/15  train_loss=0.6027  val_loss=0.7044  (patience 2/5)
-  Epoch 7/15  train_loss=0.6065  val_loss=0.7366  (patience 3/5)
-  Epoch 8/15  train_loss=0.6385  val_loss=0.6026  ← best ✓
-  Epoch 9/15  train_loss=0.6397  val_loss=0.7942  (patience 1/5)
-  Epoch 10/15  train_loss=0.6098  val_loss=0.6425  (patience 2/5)
-  Epoch 11/15  train_loss=0.6343  val_loss=0.8444  (patience 3/5)
-  Epoch 12/15  train_loss=0.6150  val_loss=0.6137  (patience 4/5)
-  Epoch 13/15  train_loss=0.6243  val_loss=0.5732  ← best ✓
-  Epoch 14/15  train_loss=0.5941  val_loss=0.7614  (patience 1/5)
-  Epoch 15/15  train_loss=0.5694  val_loss=0.6711  (patience 2/5)
-  [Joint Train] Best checkpoint saved -> checkpoints/proj_proteins_dd.pt (val_loss=0.5732)
+  Epoch 1/15  train_loss=2.4928  val_loss=1.0290  ← best ✓
+  Epoch 2/15  train_loss=0.7871  val_loss=0.8351  ← best ✓
+  Epoch 3/15  train_loss=0.7146  val_loss=0.8003  ← best ✓
+  Epoch 4/15  train_loss=0.6885  val_loss=0.6895  ← best ✓
+  Epoch 5/15  train_loss=0.6411  val_loss=5.3998  (patience 1/5)
+  Epoch 6/15  train_loss=0.8249  val_loss=0.6598  ← best ✓
+  Epoch 7/15  train_loss=0.6554  val_loss=0.8671  (patience 1/5)
+  Epoch 8/15  train_loss=0.6175  val_loss=1.0904  (patience 2/5)
+  Epoch 9/15  train_loss=0.6370  val_loss=0.6967  (patience 3/5)
+  Epoch 10/15  train_loss=0.5993  val_loss=0.7380  (patience 4/5)
+  Epoch 11/15  train_loss=0.5610  val_loss=0.7479  (patience 5/5)
+  [Early Stopping] No improvement for 5 epochs, stopping.
+  [Joint Train] Best checkpoint saved -> checkpoints/proj_proteins_dd.pt (val_loss=0.6598)
 [Eval] Test set: 237 graphs (never seen during training)
 [RAG] Encoding 1113 source graphs ...
 [RAG] Indexed 1113 source graphs
   [1-8/237] processing batch...[transformers] Ignoring clean_up_tokenization_spaces=True for BPE tokenizer TokenizersBackend. The clean_up_tokenization post-processing step is designed for WordPiece tokenizers and is destructive for BPE (it strips spaces before punctuation). Set clean_up_tokenization_spaces=False to suppress this warning, or set clean_up_tokenization_spaces_for_bpe_even_though_it_will_corrupt_output=True to force cleanup anyway.
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
+  [WARN] Repetitive digit pattern detected, using first digit -> 1  (len=6)
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.147, 59:+0.\n[4] sim=2:')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1: 50:+2.\n[4] sim=3+')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.139, 59:+0.\n[4] sim=2:')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.155, 59:+0.156: 50+2.')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.131: 59:+0.\n[4] sim=2+')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.174, 59:+0.\n[4] sim=2:')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1: 50:+2.\n[4] sim=3+')
  done.
-  [9-16/237] processing batch...  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '101010101010100101010101010101010101010010101010101001010100')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '010000100010101000100101001001010100010101010010100100100010')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '110110110110101011011101111011110111011111111011111111111111')
+  [9-16/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.235, 50:+0.236 label=2:51+')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.139, 59:+0.\n[4] sim=2:')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.156, 59:+0.155')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.195, 59:+0.196:2+3=4')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.147, 58:+0.153]\n  [3] sim')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.139, 59:+0.\n[4] sim=2:')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.147, 59:+0.\n[4] sim=2)')
+  [WARN] No 'Answer: X' found, fallback -> 1  (response: '1.235: 59:+0.\n[4] sim=2+')
  done.
-  [17-24/237] processing batch...  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111011111111111111111111101111101111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '010010101010010001001010100101010101010101010101010010101010')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '100010100101001010010101001010100100101010100101010010001010')
+  [17-24/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.156, 59:+0.174:2+3=4')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1: 50:+2.\n[4] sim=3+')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.117, 59:+0.\n2) sim=3+4')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.147, 51:+0.\n[4] sim=2:')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1. 0,50:+[2] .')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.147, 59:+0.240 label=2:50+')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.174, 50:+0.\nReference: (source) sim=')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1, 50:+2')
  done.
-  [25-32/237] processing batch...  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111010110101111101111101110110111101101111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
+  [25-32/237] processing batch...  [WARN] Repetitive digit pattern detected, using first digit -> 1  (len=7)
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.173: 50:+0.\n[4] sim=2+')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1951 59:+2.\n[4] sim=3+')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1: 50:+2.')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.151, 50:+0.')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.153: 59:+0.\n[4] sim=2+')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1: 50:+2')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.156, 59:+0.\n[4] sim=2.+')
  done.
-  [33-40/237] processing batch...  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
+  [33-40/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1: 50:+2.\n[4] sim=3+')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.177, 58:+0.153,\n] [4]\nReference')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.173, 50:+0.\n[4]+2.+3+')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1: 50:+2')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1+4=2.+3: 59:+0.\n[')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.141, 59:+0.\n[4] sim=2:')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1+4: 50:+2.\n[3] sim=')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.161, 59:+0.\n[4] sim=2:')
  done.
-  [41-48/237] processing batch...  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
+  [41-48/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.131, 80:+0.\nReference graphs (source: Protein Structure')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.243| 50:+0.\n[4] sim=2+')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.139, 59:+0.140:2+3=4')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.123, 9:+0.\n[4] sim=2:')
+  [WARN] Repetitive digit pattern detected, using first digit -> 1  (len=6)
+  [WARN] Repetitive digit pattern detected, using first digit -> 1  (len=6)
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.174, 50:+0.175')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.156, 59:+0.\n[4] sim=2:')
  done.
-  [49-56/237] processing batch...  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '010101010110101010101010101010101010101011010101010101010101')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
+  [49-56/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.243, 50:+0.\n[4] sim=2:')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1 50:+2:51,')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.238; 50:+0.\n[4] sim=2:')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.150: 59:+0.\n[4] sim=2+')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.149, 59:+0.150')
+  [WARN] Repetitive digit pattern detected, using first digit -> 1  (len=8)
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.156, 59:+0.\n[4] sim=2:')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.238; 80:+0.\n[4] sim=1+')
  done.
-  [57-64/237] processing batch...  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111110111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '010101001010101010101010110101010101010101010101010101010101')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '101011010110110101011011010101101011010101101011101011010111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
+  [57-64/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1 50:+2')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.233, 50:+0.234]\nf[3] sim')
+  [WARN] No 'Answer: X' found, fallback -> 1  (response: '1.283, 74:+0.282;')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.195, 59:+0.\n[4] sim=2:')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.173: 50:+0.\n[4] sim=2.+')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.195, 59:+0.\n[4] sim=2+')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.173, 50:+0.174')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1, 50:+0.\nReference graphs (source: 4')
  done.
-  [65-72/237] processing batch...  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
+  [65-72/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.149, 59:+0.235; 74:2+')
+  [WARN] Repetitive digit pattern detected, using first digit -> 1  (len=6)
+  [WARN] No 'Answer: X' found, fallback -> 0  (response: '0.1')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.131, 59:+0.\n[4] sim=2:')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.156, 59:+0.\n[4] sim=1+')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.150, 59:+0.\n[4] sim=2:')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.147, 74:+0.145,\n  [3] sim')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1: 50:+2')
  done.
-  [73-80/237] processing batch...  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '101010101101010110110101101011011011101101101110111011111010')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
+  [73-80/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.143, 50:+1.\n[4] sim=2:')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.239; 50:+0.\n[4] sim=2:')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.150: 59:+0.\n[4] sim=2+')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.200, 59:+0.\n[4] sim=2:')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.131, 59:+0.243 label=2:51+')
+  [WARN] Repetitive digit pattern detected, using first digit -> 1  (len=6)
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.139, 59:+0.\n[4] sim=2:')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.150, 59:+0.\n[4] sim=2:')
  done.
-  [81-88/237] processing batch...  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '101010101010101010101010101010101010101101010101011010101010')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111011111111111011111110111111111111011111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
+  [81-88/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.175, 59:+0.\n[4] sim=2:')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1: 50:+2,51:-3')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.159: 59:+0.\n156+2) sim=1')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.287, 50:+0.\n[4] sim=2:')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.238; 50:+0.\n\n[2] sim=1+')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.173, 58:+0.\n[4] sim=1+')
+  [WARN] No 'Answer: X' found, fallback -> 1  (response: '1.237; 59:+0.\n\n238: 74+2.')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.139, 59:+0.239;')
  done.
-  [89-96/237] processing batch...  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '101101010101101011011011101101111011110111110111111101111101')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
- done.
-  [97-104/237] processing batch...  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
- done.
-  [105-112/237] processing batch...  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '010101010101101101101111011011101011101111110111101111110111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '101101101101111101101110111011101111011011111011111101111101')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '110110111111111111111111111111111111111111111111111111111111')
- done.
-  [113-120/237] processing batch...  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '001000001010010001001001010101001001001010100101001010001010')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '100001010101001010101010101010101010101010101010101010101010')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
- done.
-  [121-128/237] processing batch...  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '101010101010101010101010101101010110101011010110101101011010')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '010101010101010101101101010110110101011010110101010101010101')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
- done.
-  [129-136/237] processing batch...  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: ' 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1  1 1 1 1 1 1 1 1 1   1    1 1')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
- done.
-  [137-144/237] processing batch...  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000001000000100100010010101010010000001000101010101010100010')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000001000000000000000000000000000000000000')
- done.
-  [145-152/237] processing batch...  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '000101010010101001010101010100101010101010100101010100101001')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
- done.
-  [153-160/237] processing batch...  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '010111010101101101110111101111111011111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '110110111010111111111111111111010111011111111111111111111111')
- done.
-  [161-168/237] processing batch...  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '100000000010000100001000100000100010010000010001000000010000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '101010101011010101010101010110101011010101101010101011010101')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
- done.
-  [169-176/237] processing batch...  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '101010101010101010101101010101010101010101101010110101011010')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
- done.
-  [177-184/237] processing batch...  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000001000000000010000100000000000100000000000')
- done.
-  [185-192/237] processing batch...  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
- done.
-  [193-200/237] processing batch...  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
- done.
-  [201-208/237] processing batch...  [WARN] No 'Answer: X' found, fallback to last digit -> 1  (response: '111111111111111111111111111111111111111111111111111111111111')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
- done.
-  [209-216/237] processing batch...  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
-  [WARN] No 'Answer: X' found, fallback to last digit -> 0  (response: '000000000000000000000000000000000000000000000000000000000000')
+  [89-96/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.131, 59:+0.\n[4] sim=2:')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.156, 59:+0.\n[4] sim=2:')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.136, 59:+0.137]')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.159: 59:+0.\n\n156+2] sim=4')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.270: 81:+0.\n240| 74+2.')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.239; 81:+0.\n[4] sim=1+')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.238; 74:+0.\n[4] sim=1+')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.155, 59:+0.156')
  done.

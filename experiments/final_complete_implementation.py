@@ -353,10 +353,10 @@ class TransferExperiment:
         source_name: str,
         ckpt_proj: str,
         train_epochs: int = 15,
-        train_batch_size: int = 2,    # 24GB GPU 上 8B LLM 前向需要大量显存
+        train_batch_size: int = 1,    # 显存紧张，单样本前向
         lr_gnn: float = 5e-5,
         lr_proj: float = 2e-4,
-        grad_accum_steps: int = 8,    # 等效 batch_size = 2*8 = 16
+        grad_accum_steps: int = 16,   # 等效 batch_size = 1*16 = 16
         train_ratio: float = 0.64,
         val_ratio: float = 0.16,
     ) -> List[int]:
@@ -1013,7 +1013,7 @@ def main():
         modelscope_cache_dir=MODELSCOPE_CACHE_DIR,
         modelscope_revision=MODELSCOPE_REVISION,
         num_graph_tokens=8,
-        load_in_8bit=False,        # 显存不足时设为 True
+        load_in_8bit=True,         # 8-bit 量化：LLM 显存 ~16GB→~8GB，防止溢出到共享内存
     )
 
     # LLM 天然冻结，无需检查服务状态
@@ -1021,7 +1021,7 @@ def main():
     # 运行消融实验
     ablation = experiment.run_ablation_suite(
         sample_size=200,
-        eval_batch_size=8,
+        eval_batch_size=2,         # 显存紧张，减至 2 降低 KV cache 占用
         pairs=[
             ('PROTEINS', 'DD'),
             ('DD', 'PROTEINS'),

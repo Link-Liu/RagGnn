@@ -394,7 +394,14 @@ class LocalLLMInterface:
         prompts: List[str],
         max_new_tokens: Optional[int] = None,
     ) -> List[str]:
-        """返回每个 prompt 的生成文本列表。"""
+        """
+        返回每个 prompt 的生成文本列表。
+
+        核心修复：使用 input_ids + embedding hook 方式代替 inputs_embeds，
+        确保 generate() 返回的 out_ids 中 prompt 和新生成 token 能正确分离。
+        inputs_embeds 模式下 HF generate 在某些版本中会把虚拟 input_ids
+        混入输出，导致解码出 prompt 的乱码片段。
+        """
         max_new_tokens = max_new_tokens or self.max_new_tokens
 
         graph_emb = self._encode_graph(pyg_batch)
@@ -407,34 +414,55 @@ class LocalLLMInterface:
         input_ids = enc["input_ids"].to(self.device)
         attention_mask = enc["attention_mask"].to(self.device)
 
-        embed_fn = self.llm.get_input_embeddings()
-        input_embeds = embed_fn(input_ids)
-        input_embeds = inject_graph_tokens(
-            input_embeds, soft_tokens,
+        # 预计算注入后的 embeddings
+        embed_layer = self.llm.get_input_embeddings()
+        injected_embeds = inject_graph_tokens(
+            embed_layer(input_ids), soft_tokens,
             input_ids, self.graph_token_id, self.num_graph_tokens,
         )
 
-        # 获取换行符 token id，用于在输出 "Answer: X" 后立即停止生成
-        newline_token_ids = self.tokenizer.encode("\n", add_special_tokens=False)
-        stop_ids = [self.tokenizer.eos_token_id] + newline_token_ids
+        # 用 hook 方式注入 soft tokens：
+        # 只在第一次前向（处理完整 prompt）时替换 embedding 输出，
+        # 后续 generate 的逐 token 解码步不需要替换。
+        self._hook_injected_embeds = injected_embeds
+        self._hook_input_len = input_ids.shape[1]
+        self._hook_call_count = 0
 
-        out_ids = self.llm.generate(
-            inputs_embeds=input_embeds,
-            attention_mask=attention_mask,
-            max_new_tokens=max_new_tokens,
-            do_sample=False,
-            repetition_penalty=1.5,       # 防止重复生成 0/1 数字串
-            pad_token_id=self.tokenizer.eos_token_id,
-            eos_token_id=stop_ids,         # 遇到换行或 EOS 立即停止
-        )
-        # 只解码新生成的 token（去掉 prompt 部分），
-        # 防止 prompt 中的文本（如 'label 0'、'label 1'）干扰预测解析
+        def _embed_hook(module, args, output):
+            """在 embedding 层输出后，将 prompt 部分替换为注入了 soft token 的版本。"""
+            self._hook_call_count += 1
+            # 只在第一次调用时（处理完整 prompt）注入
+            if self._hook_call_count == 1:
+                return self._hook_injected_embeds
+            # 后续逐 token 生成步骤，直接返回原始 embedding
+            return output
+
+        hook_handle = embed_layer.register_forward_hook(_embed_hook)
+
+        try:
+            # 获取换行符 token id，用于在输出 "Answer: X" 后立即停止生成
+            newline_token_ids = self.tokenizer.encode("\n", add_special_tokens=False)
+            stop_ids = [self.tokenizer.eos_token_id] + newline_token_ids
+
+            out_ids = self.llm.generate(
+                input_ids=input_ids,           # 传 input_ids 而非 inputs_embeds
+                attention_mask=attention_mask,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                repetition_penalty=1.5,
+                pad_token_id=self.tokenizer.eos_token_id,
+                eos_token_id=stop_ids,
+            )
+        finally:
+            hook_handle.remove()
+            # 清理临时属性
+            del self._hook_injected_embeds
+            del self._hook_input_len
+            del self._hook_call_count
+
+        # 裁剪：只保留新生成的 token（input_ids 模式下 out_ids 包含完整序列）
         input_len = input_ids.shape[1]
-        if out_ids.shape[1] > input_len:
-            new_ids = out_ids[:, input_len:]
-        else:
-            # 某些 HF 版本 inputs_embeds+generate 只返回新 token
-            new_ids = out_ids
+        new_ids = out_ids[:, input_len:]
         return self.tokenizer.batch_decode(new_ids, skip_special_tokens=True)
 
     # ----------------------------------------------------------
