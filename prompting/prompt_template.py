@@ -224,28 +224,28 @@ def create_detailed_prompt(target_graph_info: Dict,
 
     parts = []
 
-    # 描述部分（desc）：任务说明 + 标签含义
+    # 描述部分：任务说明 + 标签含义 + 强制指令
     parts.append(
-        f"Graph binary classification task. "
-        f"0 = {target_sem['label_neg']}. "
-        f"1 = {target_sem['label_pos']}."
+        f"You are a graph classification model. "
+        f"The graph structure information has been provided to you as embedding tokens. "
+        f"Based on the graph embedding, classify the graph into one of two categories: "
+        f"0 = {target_sem['label_neg']}, "
+        f"1 = {target_sem['label_pos']}. "
+        f"You must respond with exactly one digit: 0 or 1."
     )
-
-    # 注意：图的结构信息通过 soft tokens 在 embedding 层面 concat 注入，
-    # 不需要在文本中放 <graph_token> 占位符
 
     # RAG 参考图（只保留 LLM 能理解的字段：相似度 + 标签）
     if retrieved_examples:
-        parts.append(f"\nReference graphs (source: {source_sem['task']}):")
+        parts.append(f"\nReference graphs from {source_sem['task']}:")
         for i, ex in enumerate(retrieved_examples[:5]):
             label = ex.get('label', '?')
             score = ex.get('retrieval_score', 0.0)
             parts.append(f"  [{i+1}] similarity={score:.3f} label={label}")
 
-    # Question + Answer 格式（参考 GraphPrompter）
+    # 简短直接的指令
     parts.append(
-        "\nQuestion: What is the predicted label (0 or 1) for the target graph?"
-        "\n\nAnswer:"
+        "\nBased on the graph embedding and reference information, predict the label."
+        "\nAnswer with a single digit (0 or 1):"
     )
 
     if include_target_label and target_label is not None:
@@ -270,20 +270,20 @@ def create_no_rag_prompt(target_graph_info: Dict,
 
     parts = []
 
-    # 描述部分
+    # 描述部分：强制指令
     parts.append(
-        f"Graph binary classification task. "
-        f"0 = {target_sem['label_neg']}. "
-        f"1 = {target_sem['label_pos']}."
+        f"You are a graph classification model. "
+        f"The graph structure information has been provided to you as embedding tokens. "
+        f"Based on the graph embedding, classify the graph into one of two categories: "
+        f"0 = {target_sem['label_neg']}, "
+        f"1 = {target_sem['label_pos']}. "
+        f"You must respond with exactly one digit: 0 or 1."
     )
 
-    # 无参考图
-    parts.append("\nNo reference graphs available.")
-
-    # Question + Answer 格式
+    # 简短直接的指令
     parts.append(
-        "\nQuestion: What is the predicted label (0 or 1) for the target graph?"
-        "\n\nAnswer:"
+        "\nBased on the graph embedding, predict the label."
+        "\nAnswer with a single digit (0 or 1):"
     )
 
     return "\n".join(parts)

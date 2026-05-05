@@ -257,7 +257,6 @@ class TransferExperiment:
         for i, (data, emb) in enumerate(zip(src_list, src_embs)):
             info = extract_graph_info(data, f"{source_name}_{i}", source_name)
             info['source_domain'] = source_name.lower()
-            info['graph_tokens_text'] = serialize_graph_tokens(emb)
             src_infos.append(info)
         
         retriever = GraphRetriever(embedding_dim=self.hidden_dim)
@@ -512,7 +511,6 @@ class TransferExperiment:
         for i, (data, emb) in enumerate(zip(src_list, src_embs)):
             info = extract_graph_info(data, f"{source_name}_{i}", source_name)
             info['source_domain'] = source_name.lower()
-            info['graph_tokens_text'] = serialize_graph_tokens(emb)
             src_infos.append(info)
 
         retriever = GraphRetriever(embedding_dim=self.hidden_dim)
