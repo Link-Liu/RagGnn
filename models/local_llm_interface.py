@@ -83,14 +83,17 @@ class GINEncoder(nn.Module):
 # Graph Projector：GNN 嵌入 → LLM 词嵌入空间
 # ============================================================
 class GraphProjector(nn.Module):
-    def __init__(self, gnn_dim: int, llm_dim: int, num_tokens: int = 8):
+    """参考 GraphPrompter 的 Projector 架构：Linear → Sigmoid → Linear"""
+    def __init__(self, gnn_dim: int, llm_dim: int, num_tokens: int = 1):
         super().__init__()
         self.num_tokens = num_tokens
         self.llm_dim = llm_dim
+        # GraphPrompter 风格: gnn_dim → mid → llm_dim * num_tokens
+        mid_dim = min(gnn_dim * 4, llm_dim)  # 512*4=2048, cap at llm_dim
         self.proj = nn.Sequential(
-            nn.Linear(gnn_dim, llm_dim * 2),
-            nn.GELU(),
-            nn.Linear(llm_dim * 2, llm_dim * num_tokens),
+            nn.Linear(gnn_dim, mid_dim),
+            nn.Sigmoid(),
+            nn.Linear(mid_dim, llm_dim * num_tokens),
         )
 
     def forward(self, graph_emb: torch.Tensor) -> torch.Tensor:
@@ -171,7 +174,7 @@ class LocalLLMInterface:
         num_node_features: int,        # GNN 输入节点特征维度
         gnn_hidden_dim: int = 128,     # GNN 隐层维度
         gnn_num_layers: int = 4,       # GNN 层数
-        num_graph_tokens: int = 8,     # 每图注入的 soft token 数
+        num_graph_tokens: int = 1,     # 参考 GraphPrompter，只需 1 个 soft token
         max_new_tokens: int = 16,      # 不需要思维链，只需 "Answer: 0/1"，16 token 足够
         device: str = "auto",
         load_in_8bit: bool = False,    # 是否用 8-bit 量化节省显存
@@ -180,6 +183,7 @@ class LocalLLMInterface:
     ):
         self.num_graph_tokens = num_graph_tokens
         self.max_new_tokens = max_new_tokens
+        self.max_txt_len = 512  # 参考 GraphPrompter 的 max_txt_len
         self.call_count = 0
         
         # 标签 token 缓存（只缓存 "0" 和 "1" 两个固定标签）
@@ -314,7 +318,28 @@ class LocalLLMInterface:
         return self.projector(graph_emb)
 
     # ----------------------------------------------------------
+    # Chat template 包装（Instruct 模型需要）
+    # ----------------------------------------------------------
+    def _wrap_chat_template(self, prompts: List[str]) -> List[str]:
+        """用 Instruct 模型的 chat template 包装 prompt 文本。"""
+        if not hasattr(self.tokenizer, 'apply_chat_template'):
+            return prompts
+        wrapped = []
+        for p in prompts:
+            try:
+                text = self.tokenizer.apply_chat_template(
+                    [{"role": "user", "content": p}],
+                    tokenize=False, add_generation_prompt=True
+                )
+                wrapped.append(text)
+            except Exception:
+                wrapped.append(p)
+        return wrapped
+
+    # ----------------------------------------------------------
     # 前向（训练用）：计算 cross-entropy loss
+    # GraphPrompter 风格: 手动拼接 [bos] + [graph] + [text] + [label+eos]
+    # + Instruct 模型: 用 chat template 包装 prompt
     # ----------------------------------------------------------
     def compute_loss(
         self,
@@ -323,12 +348,9 @@ class LocalLLMInterface:
         labels_text: List[str],
     ) -> torch.Tensor:
         """
-        Args:
-            pyg_batch:    PyG Batch 对象（含 x, edge_index, batch, y）
-            prompts:      含 <graph_token> 占位符的提示词列表
-            labels_text:  标签文本列表（如 ["0", "1", ...]）
-        Returns:
-            loss scalar（只对标签位置计算）
+        融合 GraphPrompter 的 concat 注入 + Instruct 模型的 chat template。
+        [BOS] + [graph_tokens] + [chat_template(prompt)] + [label + EOS]
+        只对 label 位置计算 cross-entropy loss。
         """
         B = pyg_batch.num_graphs
 
@@ -336,60 +358,65 @@ class LocalLLMInterface:
         graph_emb = self._encode_graph(pyg_batch)          # [B, hidden]
         soft_tokens = self._get_soft_tokens(graph_emb)     # [B, num_tok, llm_dim]
 
-        # 2. Tokenize 提示词（每次重新 tokenize，不缓存 — 每个 batch 的 prompt 不同，
-        #    缓存只会导致 GPU 显存无限增长而永远不命中）
-        enc = self.tokenizer(
-            prompts, return_tensors="pt", padding=True,
-            truncation=True, max_length=512,
-        )
-        input_ids = enc["input_ids"].to(self.device)
-        attention_mask = enc["attention_mask"].to(self.device)
+        # 2. 用 chat template 包装后 tokenize（不加 special tokens，BOS 手动加）
+        wrapped = self._wrap_chat_template(prompts)
+        text_enc = self.tokenizer(wrapped, add_special_tokens=False)
+        label_enc = self.tokenizer(labels_text, add_special_tokens=False)
 
-        # 3. 获取词嵌入并注入 soft tokens
+        # 3. 获取特殊 token 的 embedding
         embed_fn = self.llm.get_input_embeddings()
-        input_embeds = embed_fn(input_ids)                 # [B, seq, llm_dim]
-        input_embeds = inject_graph_tokens(
-            input_embeds, soft_tokens,
-            input_ids, self.graph_token_id, self.num_graph_tokens,
-        )
+        bos_embed = embed_fn(torch.tensor([self.tokenizer.bos_token_id], device=self.device))  # [1, D]
+        pad_embed = embed_fn(torch.tensor([self.tokenizer.pad_token_id], device=self.device))  # [1, D]
 
-        # 4. Tokenize 标签 (A3: 缓存优化)
-        # 预先 Tokenize 核心标签 "0" 和 "1"
-        if "0" not in self._label_cache:
-            for l_str in ["0", "1"]:
-                l_enc = self.tokenizer(
-                    l_str, return_tensors="pt", add_special_tokens=False
-                )
-                self._label_cache[l_str] = l_enc["input_ids"].to(self.device)
-                # 记录 mask（全 1，因为标签通常是一个 token）
-                self._label_cache[l_str + "_mask"] = l_enc["attention_mask"].to(self.device)
+        # 4. 逐样本手动拼接 embeddings
+        batch_inputs_embeds = []
+        batch_attention_mask = []
+        batch_label_ids = []
 
-        # 构造 batch 的 label_ids 和 label_mask
-        label_ids = torch.cat([self._label_cache[l] for l in labels_text], dim=0)
-        label_mask = torch.cat([self._label_cache[l + "_mask"] for l in labels_text], dim=0)
-        label_embeds = embed_fn(label_ids)
+        for i in range(B):
+            # label: label_tokens + EOS
+            label_ids_i = label_enc.input_ids[i] + [self.tokenizer.eos_token_id]
+            # text: prompt tokens + label tokens
+            text_ids_i = text_enc.input_ids[i][:self.max_txt_len] + label_ids_i
 
-        # 5. 拼接 prompt + label
-        full_embeds = torch.cat([input_embeds, label_embeds], dim=1)
-        full_mask = torch.cat([attention_mask, label_mask], dim=1)
+            text_embeds = embed_fn(torch.tensor(text_ids_i, device=self.device))
+            # 拼接: [BOS] + [graph_tokens] + [text + label]
+            seq_embeds = torch.cat([bos_embed, soft_tokens[i], text_embeds], dim=0)
 
-        # 6. 构造 labels（prompt 位置忽略，label 位置计算 loss）
-        ignore = torch.full(
-            (B, input_ids.size(1)), -100,
-            dtype=torch.long, device=self.device,
-        )
-        labels = torch.cat([ignore, label_ids], dim=1)
+            batch_inputs_embeds.append(seq_embeds)
+            batch_attention_mask.append([1] * seq_embeds.shape[0])
 
+            # Label: prompt 部分用 -100 忽略，label 部分参与 loss
+            n_ignore = seq_embeds.shape[0] - len(label_ids_i)
+            label_for_loss = [-100] * n_ignore + label_ids_i
+            batch_label_ids.append(label_for_loss)
+
+        # 5. 左侧 padding 对齐
+        max_length = max(x.shape[0] for x in batch_inputs_embeds)
+        for i in range(B):
+            pad_len = max_length - batch_inputs_embeds[i].shape[0]
+            if pad_len > 0:
+                batch_inputs_embeds[i] = torch.cat([pad_embed.repeat(pad_len, 1), batch_inputs_embeds[i]])
+                batch_attention_mask[i] = [0] * pad_len + batch_attention_mask[i]
+                batch_label_ids[i] = [-100] * pad_len + batch_label_ids[i]
+
+        inputs_embeds = torch.stack(batch_inputs_embeds, dim=0)
+        attention_mask = torch.tensor(batch_attention_mask, device=self.device)
+        label_ids = torch.tensor(batch_label_ids, device=self.device)
+
+        # 6. LLM 前向
         outputs = self.llm(
-            inputs_embeds=full_embeds,
-            attention_mask=full_mask,
-            labels=labels,
-            use_cache=False,  # 训练时不需要 KV cache，节省显存
+            inputs_embeds=inputs_embeds,
+            attention_mask=attention_mask,
+            labels=label_ids,
+            return_dict=True,
+            use_cache=False,
         )
         return outputs.loss
 
     # ----------------------------------------------------------
     # 推理（generate）
+    # 参考 GraphPrompter: [bos] + [graph] + [text] → generate → 完整 decode
     # ----------------------------------------------------------
     @torch.no_grad()
     def generate(
@@ -399,75 +426,59 @@ class LocalLLMInterface:
         max_new_tokens: Optional[int] = None,
     ) -> List[str]:
         """
-        返回每个 prompt 的生成文本列表。
-
-        核心修复：使用 input_ids + embedding hook 方式代替 inputs_embeds，
-        确保 generate() 返回的 out_ids 中 prompt 和新生成 token 能正确分离。
-        inputs_embeds 模式下 HF generate 在某些版本中会把虚拟 input_ids
-        混入输出，导致解码出 prompt 的乱码片段。
+        GraphPrompter 风格的推理。
+        手动拼接 [BOS] + [graph_tokens] + [text_tokens]，
+        直接用 inputs_embeds 调用 generate()，
+        decode 完整输出并返回（包含 prompt 部分，在 predict_batch 中 regex 提取）。
         """
         max_new_tokens = max_new_tokens or self.max_new_tokens
 
         graph_emb = self._encode_graph(pyg_batch)
         soft_tokens = self._get_soft_tokens(graph_emb)
 
-        enc = self.tokenizer(
-            prompts, return_tensors="pt", padding=True,
-            truncation=True, max_length=512,
+        # 用 chat template 包装后 tokenize
+        wrapped = self._wrap_chat_template(prompts)
+        text_enc = self.tokenizer(wrapped, add_special_tokens=False)
+
+        embed_fn = self.llm.get_input_embeddings()
+        bos_embed = embed_fn(torch.tensor([self.tokenizer.bos_token_id], device=self.device))
+        pad_embed = embed_fn(torch.tensor([self.tokenizer.pad_token_id], device=self.device))
+
+        B = len(prompts)
+        batch_inputs_embeds = []
+        batch_attention_mask = []
+
+        for i in range(B):
+            text_ids_i = text_enc.input_ids[i][:self.max_txt_len]
+            text_embeds = embed_fn(torch.tensor(text_ids_i, device=self.device))
+            # [BOS] + [graph_tokens] + [text_tokens]
+            seq_embeds = torch.cat([bos_embed, soft_tokens[i], text_embeds], dim=0)
+            batch_inputs_embeds.append(seq_embeds)
+            batch_attention_mask.append([1] * seq_embeds.shape[0])
+
+        # 左侧 padding
+        max_length = max(x.shape[0] for x in batch_inputs_embeds)
+        for i in range(B):
+            pad_len = max_length - batch_inputs_embeds[i].shape[0]
+            if pad_len > 0:
+                batch_inputs_embeds[i] = torch.cat([pad_embed.repeat(pad_len, 1), batch_inputs_embeds[i]])
+                batch_attention_mask[i] = [0] * pad_len + batch_attention_mask[i]
+
+        inputs_embeds = torch.stack(batch_inputs_embeds, dim=0)
+        attention_mask = torch.tensor(batch_attention_mask, device=self.device)
+
+        # generate（直接用 inputs_embeds，参考 GraphPrompter）
+        outputs = self.llm.generate(
+            inputs_embeds=inputs_embeds,
+            max_new_tokens=max_new_tokens,
+            attention_mask=attention_mask,
+            do_sample=False,
+            use_cache=True,
         )
-        input_ids = enc["input_ids"].to(self.device)
-        attention_mask = enc["attention_mask"].to(self.device)
 
-        # 预计算注入后的 embeddings
-        embed_layer = self.llm.get_input_embeddings()
-        injected_embeds = inject_graph_tokens(
-            embed_layer(input_ids), soft_tokens,
-            input_ids, self.graph_token_id, self.num_graph_tokens,
-        )
-
-        # 用 hook 方式注入 soft tokens：
-        # 只在第一次前向（处理完整 prompt）时替换 embedding 输出，
-        # 后续 generate 的逐 token 解码步不需要替换。
-        self._hook_injected_embeds = injected_embeds
-        self._hook_input_len = input_ids.shape[1]
-        self._hook_call_count = 0
-
-        def _embed_hook(module, args, output):
-            """在 embedding 层输出后，将 prompt 部分替换为注入了 soft token 的版本。"""
-            self._hook_call_count += 1
-            # 只在第一次调用时（处理完整 prompt）注入
-            if self._hook_call_count == 1:
-                return self._hook_injected_embeds
-            # 后续逐 token 生成步骤，直接返回原始 embedding
-            return output
-
-        hook_handle = embed_layer.register_forward_hook(_embed_hook)
-
-        try:
-            # 获取换行符 token id，用于在输出 "Answer: X" 后立即停止生成
-            newline_token_ids = self.tokenizer.encode("\n", add_special_tokens=False)
-            stop_ids = [self.tokenizer.eos_token_id] + newline_token_ids
-
-            out_ids = self.llm.generate(
-                input_ids=input_ids,           # 传 input_ids 而非 inputs_embeds
-                attention_mask=attention_mask,
-                max_new_tokens=max_new_tokens,
-                do_sample=False,
-                repetition_penalty=1.5,
-                pad_token_id=self.tokenizer.eos_token_id,
-                eos_token_id=stop_ids,
-            )
-        finally:
-            hook_handle.remove()
-            # 清理临时属性
-            del self._hook_injected_embeds
-            del self._hook_input_len
-            del self._hook_call_count
-
-        # 裁剪：只保留新生成的 token（input_ids 模式下 out_ids 包含完整序列）
-        input_len = input_ids.shape[1]
-        new_ids = out_ids[:, input_len:]
-        return self.tokenizer.batch_decode(new_ids, skip_special_tokens=True)
+        # decode 完整输出（包含 prompt 部分），在 predict_batch 中用 regex 提取
+        pred = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
+        return pred
 
     # ----------------------------------------------------------
     # predict（支持 batch）
@@ -483,31 +494,24 @@ class LocalLLMInterface:
         batch_results = []
         for content in results:
             content = content.strip()
-            # 解析 "Answer: 0/1"
-            match = re.search(r'Answer\s*:\s*([01])', content, re.IGNORECASE)
-            if match is not None:
-                prediction = int(match.group(1))
+            # 从完整输出中提取 "Answer: 0/1"（取最后一个匹配，因为完整输出包含 prompt）
+            matches = re.findall(r'Answer\s*:\s*([01])', content, re.IGNORECASE)
+            if matches:
+                prediction = int(matches[-1])  # 取最后一个匹配（即模型生成的）
                 confidence = 1.0
             else:
-                # 检测重复数字模式（如 '000000...' 或 '111111...'）
-                # 这种情况下用第一个数字作为预测
-                only_digits = re.sub(r'[^01]', '', content)
-                if len(only_digits) >= 3:
-                    # 重复模式：取首个数字
-                    prediction = int(only_digits[0])
-                    confidence = 0.6
-                    if len(only_digits) > 5:
-                        print(f"  [WARN] Repetitive digit pattern detected, using first digit -> {prediction}  (len={len(only_digits)})")
-                    else:
-                        print(f"  [WARN] No 'Answer: X' found, fallback to first digit -> {prediction}  (response: {content[:60]!r})")
-                elif only_digits:
-                    prediction = int(only_digits[0])
+                # 取输出末尾的数字作为 fallback
+                # 完整输出中末尾就是模型新生成的部分
+                tail = content[-30:] if len(content) > 30 else content
+                tail_digits = re.findall(r'[01]', tail)
+                if tail_digits:
+                    prediction = int(tail_digits[-1])
                     confidence = 0.5
-                    print(f"  [WARN] No 'Answer: X' found, fallback -> {prediction}  (response: {content[:60]!r})")
+                    print(f"  [WARN] No 'Answer: X' found, tail fallback -> {prediction}  (tail: {tail!r})")
                 else:
                     prediction = np.random.randint(0, 2)
                     confidence = 0.1
-                    print(f"  [WARN] Cannot determine label, random fallback -> {prediction}  (response: {content[:80]!r})")
+                    print(f"  [WARN] Cannot determine label, random fallback -> {prediction}  (tail: {tail!r})")
             
             batch_results.append({
                 'prediction': prediction,

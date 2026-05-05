@@ -50,7 +50,7 @@ from dataset.mol_graph_utils import (
 )
 
 # 默认使用 ModelScope 模型 ID，可通过环境变量覆盖
-# 注意：必须用 Instruct 版本！Base model 只会续写文本，不会遵循指令
+# 使用 Instruct 模型 + Chat Template，同时采用 GraphPrompter 的 concat 注入方式
 MODELSCOPE_MODEL_ID = os.getenv(
     'MODELSCOPE_MODEL_ID',
     'LLM-Research/Meta-Llama-3.1-8B-Instruct',
@@ -353,7 +353,7 @@ class TransferExperiment:
         target_name: str,
         source_name: str,
         ckpt_proj: str,
-        train_epochs: int = 15,
+        train_epochs: int = 50,       # 增加训练轮数，让 projector 充分学习
         train_batch_size: int = 1,    # 显存紧张，单样本前向
         lr_gnn: float = 5e-5,
         lr_proj: float = 2e-4,
@@ -470,9 +470,8 @@ class TransferExperiment:
         best_val_loss = float("inf")
         best_state = None
         patience_counter = 0
-        patience_limit = 5  # Early stopping patience
+        patience_limit = 10  # Early stopping patience（50 epoch 需要更大 patience）
         use_amp = self.device == "cuda"
-        graph_token_placeholder = " ".join([GRAPH_TOKEN] * self.num_graph_tokens)
 
         # ---- 训练循环 ----
         for epoch in range(1, train_epochs + 1):
@@ -493,7 +492,6 @@ class TransferExperiment:
                         property_description=prop_desc,
                         target_dataset=target_name.lower(),
                         source_dataset=source_name.lower(),
-                        graph_tokens_text=graph_token_placeholder
                     )
                     prompts.append(p)
                 
@@ -534,7 +532,6 @@ class TransferExperiment:
                             property_description=prop_desc,
                             target_dataset=target_name.lower(),
                             source_dataset=source_name.lower(),
-                            graph_tokens_text=graph_token_placeholder
                         )
                         prompts.append(p)
                     
@@ -663,11 +660,6 @@ class TransferExperiment:
         prop_desc = self.PROP_DESC.get(target_name.lower(), target_name)
         predictions, true_labels, details = [], [], []
         failed = 0
-
-        # 构造 graph token 占位符（推理时必须使用占位符，而非序列化文本，
-        # 否则 inject_graph_tokens 找不到 graph_token_id，soft token 注入完全失效！）
-        graph_token_placeholder = " ".join([GRAPH_TOKEN] * self.num_graph_tokens)
-
         # B1: 改为按 Batch 推理
         from torch_geometric.data import Batch as PyGBatch
         for start_pos in range(0, n_target, eval_batch_size):
@@ -695,18 +687,16 @@ class TransferExperiment:
                     graph_info = extract_graph_info(data, f"{target_name}_batch", target_name)
                     emb = batch_embs[i]
                     
-                    # RAG 检索（仍然是 CPU，但现在 GNN 是批量的）
+                    # RAG 检索
                     retrieved = retriever.retrieve_similar_graphs(emb, graph_info, k=5)
 
-                    # 推理 prompt 使用 <graph_token> 占位符，
-                    # 与训练时一致，确保 soft token 注入正常工作
+                    # 图结构信息通过 soft tokens concat 注入，prompt 只放 LLM 能理解的文本
                     prompt = create_detailed_prompt(
                         target_graph_info=graph_info,
                         retrieved_examples=retrieved,
                         property_description=prop_desc,
                         target_dataset=target_name.lower(),
                         source_dataset=source_name.lower(),
-                        graph_tokens_text=graph_token_placeholder,
                     )
                     batch_prompts.append(prompt)
 
@@ -810,10 +800,6 @@ class TransferExperiment:
         predictions, true_labels, details = [], [], []
         failed = 0
 
-        # 构造 graph token 占位符（No-RAG 也需要 soft token 注入，
-        # 否则 GNN 编码了图但信息无法到达 LLM）
-        graph_token_placeholder = " ".join([GRAPH_TOKEN] * self.num_graph_tokens)
-
         # B1: 改为按 Batch 推理
         from torch_geometric.data import Batch as PyGBatch
         for start_pos in range(0, n_target, eval_batch_size):
@@ -832,7 +818,6 @@ class TransferExperiment:
                         target_graph_info=graph_info,
                         property_description=prop_desc,
                         target_dataset=target_name.lower(),
-                        graph_tokens_text=graph_token_placeholder,
                     )
                     batch_prompts.append(prompt)
 
@@ -1007,13 +992,13 @@ def main():
     # MODELSCOPE_CACHE_DIR=<project>/checkpoints/modelscope
     experiment = TransferExperiment(
         data_dir="data",
-        hidden_dim=128,
-        gnn_epochs=50,
+        hidden_dim=512,            # 增大 GNN 维度，减少信息瓶颈（原 128，GraphPrompter 用 1024）
+        gnn_epochs=100,            # 增加 GNN 预训练轮数（原 50）
         gnn_batch_size=128,
         llm_path=MODELSCOPE_MODEL_ID,
         modelscope_cache_dir=MODELSCOPE_CACHE_DIR,
         modelscope_revision=MODELSCOPE_REVISION,
-        num_graph_tokens=8,
+        num_graph_tokens=1,        # 减少到 1（参考 GraphPrompter），减轻 projector 负担
         load_in_8bit=True,         # 8-bit 量化：LLM 显存 ~16GB→~8GB，防止溢出到共享内存
     )
 

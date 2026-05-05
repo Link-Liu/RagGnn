@@ -224,30 +224,28 @@ def create_detailed_prompt(target_graph_info: Dict,
 
     parts = []
 
-    # 精简 prompt：直接要求输出答案，不要求思维链推理
+    # 描述部分（desc）：任务说明 + 标签含义
     parts.append(
-        "Graph binary classification. "
-        f"Predict label for the target graph. "
+        f"Graph binary classification task. "
         f"0 = {target_sem['label_neg']}. "
         f"1 = {target_sem['label_pos']}."
     )
 
-    # GNN graph tokens（唯一的图结构信号）
-    if graph_tokens_text:
-        parts.append(f"\nTarget graph GNN embedding: {graph_tokens_text}")
+    # 注意：图的结构信息通过 soft tokens 在 embedding 层面 concat 注入，
+    # 不需要在文本中放 <graph_token> 占位符
 
-    # RAG 参考图（精简格式）
+    # RAG 参考图（只保留 LLM 能理解的字段：相似度 + 标签）
     if retrieved_examples:
         parts.append(f"\nReference graphs (source: {source_sem['task']}):")
         for i, ex in enumerate(retrieved_examples[:5]):
             label = ex.get('label', '?')
             score = ex.get('retrieval_score', 0.0)
-            ref_tokens = ex.get('graph_tokens_text', '')
-            parts.append(f"  [{i+1}] sim={score:.3f} label={label} tokens={ref_tokens}")
+            parts.append(f"  [{i+1}] similarity={score:.3f} label={label}")
 
-    # 输出格式：直接输出，不要推理
+    # Question + Answer 格式（参考 GraphPrompter）
     parts.append(
-        "\nDo NOT explain. Respond with ONLY:\nAnswer: 0\nor\nAnswer: 1"
+        "\nQuestion: What is the predicted label (0 or 1) for the target graph?"
+        "\n\nAnswer:"
     )
 
     if include_target_label and target_label is not None:
@@ -266,30 +264,26 @@ def create_no_rag_prompt(target_graph_info: Dict,
                           graph_tokens_text: Optional[str] = None) -> str:
     """
     消融实验用 Prompt：不提供 RAG 检索结果。
-    graph_tokens_text 应传入 <graph_token> 占位符，供 soft token 注入使用。
+    图结构信息通过 soft tokens 在 embedding 层面 concat 注入。
     """
     target_sem = _get_domain_info(target_dataset)
 
     parts = []
 
-    # 精简 No-RAG prompt：直接要求输出答案
+    # 描述部分
     parts.append(
-        "Graph binary classification. "
-        f"Predict label for the target graph. "
+        f"Graph binary classification task. "
         f"0 = {target_sem['label_neg']}. "
         f"1 = {target_sem['label_pos']}."
     )
 
-    # GNN graph tokens
-    if graph_tokens_text:
-        parts.append(f"\nTarget graph GNN embedding: {graph_tokens_text}")
-
-    # No-RAG 无参考图
+    # 无参考图
     parts.append("\nNo reference graphs available.")
 
-    # 输出格式：直接输出，不要推理
+    # Question + Answer 格式
     parts.append(
-        "\nDo NOT explain. Respond with ONLY:\nAnswer: 0\nor\nAnswer: 1"
+        "\nQuestion: What is the predicted label (0 or 1) for the target graph?"
+        "\n\nAnswer:"
     )
 
     return "\n".join(parts)
