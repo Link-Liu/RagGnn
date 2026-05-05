@@ -233,8 +233,12 @@ class LocalLLMInterface:
             trust_remote_code=True,
         )
         if load_in_8bit:
-            load_kwargs["load_in_8bit"] = True
+            # 新版 transformers 废弃了 load_in_8bit，改用 BitsAndBytesConfig
+            from transformers import BitsAndBytesConfig
+            quantization_config = BitsAndBytesConfig(load_in_8bit=True)
+            load_kwargs["quantization_config"] = quantization_config
             load_kwargs["device_map"] = {"": self.device.index if self.device.index is not None else 0}
+            print("[LLM] 8-bit quantization enabled via BitsAndBytesConfig")
         else:
             # 显式指定显卡，防止 accelerate 误判到 CPU
             load_kwargs["device_map"] = {"": self.device.index if self.device.index is not None else 0}
