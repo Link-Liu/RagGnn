@@ -3,173 +3,151 @@
   Domain-Aware RAG-MDA — Graph Transfer Learning + Ablation
   LLM Backend: ModelScope (frozen, soft graph token injection)
 ============================================================
+[Init] device=cuda, llm=LLM-Research/Meta-Llama-3.1-8B
+
 ============================================================
-  Transfer: PROTEINS -> DD  (sample=200, batch=8)
-============================================================
-  Transfer: PROTEINS -> DD  (sample=200, batch=8)
+  Transfer: PROTEINS -> DD  (sample=200, batch=2)
 ============================================================
 [Feature] Unifying dims: PROTEINS=4, DD=89 -> 89
 [Feature] Padding PROTEINS with 85 zeros
 [LLM] Initializing LocalLLMInterface (node_feat=89) ...
 [LLM] Downloading from ModelScope: LLM-Research/Meta-Llama-3.1-8B (cache_dir=D:\LCY\RagGnn\checkpoints\modelscope, revision=master)
 Downloading Model from https://www.modelscope.cn to directory: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B
-2026-05-04 10:10:01,680 - modelscope - INFO - Creating symbolic link [D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B].
-2026-05-04 10:10:01,680 - modelscope - WARNING - Failed to create symbolic link D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B for D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B.
+2026-05-05 13:00:52,389 - modelscope - INFO - Creating symbolic link [D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B].
+2026-05-05 13:00:52,389 - modelscope - WARNING - Failed to create symbolic link D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B for D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B.
 [LLM] Loading tokenizer from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B
 [LLM] Loading model from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B to cuda
+[LLM] 8-bit quantization enabled via BitsAndBytesConfig
 [transformers] `torch_dtype` is deprecated! Use `dtype` instead!
-Loading weights: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 291/291 [00:05<00:00, 56.72it/s] 
-[LLM] Model actually loaded on: cuda:0
-[transformers] The new embeddings will be initialized from a multivariate normal distribution that has old embeddings' mean and covariance. As described in this article: https://nlp.stanford.edu/~johnhew/vocab-expansion.html. To disable this, use `2026-05-04 10:10:01,680 - modelscope - WARNING - Failed to create symbolic link D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B for D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B.
-[LLM] Loading tokenizer from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B
-[LLM] Loading model from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B to cuda
-[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
-Loading weights: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 291/291 [00:05<00:00, 56.72it/s] 
-[LLM] Model actually loaded on: cuda:0
-[transformers] The new embeddings will be initialized from a multivariate normal distribution that has old embeddings' mean and covariance. As described in this article: https://nlp.stanford.edu/~johnhew/vocab-expansion.html. To disable this, use `[LLM] Loading tokenizer from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B
-[LLM] Loading model from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B to cuda
-[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
-Loading weights: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 291/291 [00:05<00:00, 56.72it/s] 
+Loading weights: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 291/291 [00:09<00:00, 32.22it/s]
 [LLM] Model actually loaded on: cuda:0
 [transformers] The new embeddings will be initialized from a multivariate normal distribution that has old embeddings' mean and covariance. As described in this article: https://nlp.stanford.edu/~johnhew/vocab-expansion.html. To disable this, use `mean_resizing=False`
-[transformers] The new lm_head weights will be initialized from a multivariate normal distribution that has old embeddings' mean and covariance. As described in this article: https://nlp.stanford.edu/~johnhew/vocab-expansion.html. To disable this, use `mean_resizing=False`
+[transformers] The new lm_head weights will be initialized from a multivariate normal distribution that has old embeddings' mean and covariance. As described in this article: https://nlp.stanford.edu/~johnhcab-expansion.html. To disable this, use `mean_resizing=False`
+[transformers] The new lm_head weights will be initialized from a multivariate normal distribution that has old embeddings' mean and covariance. As described in this article: https://nlp.stanford.edu/~johnh[transformers] The new lm_head weights will be initialized from a multivariate normal distribution that has old embeddings' mean and covariance. As described in this article: https://nlp.stanford.edu/~johnhew/vocab-expansion.html. To disable this, use `mean_resizing=False`
 [LLM] All LLM parameters FROZEN.
 [LLM] Gradient checkpointing ENABLED (saves ~60-70% activation memory).
+[LLM] All LLM parameters FROZEN.
 [LLM] Gradient checkpointing ENABLED (saves ~60-70% activation memory).
 [GNN] node_feat=89, hidden=128, layers=4, graph_tokens=8
 [Params] Trainable (GNN+Proj): 269,653,120 | Frozen (LLM): 8,030,269,440 | Ratio: 3.249%
-[GNN-Pretrain] Loaded from checkpoints/gnn_proteins.pt
+[GNN-Pretrain] Training on 1113 graphs, 50 epochs ...
+[LLM] Gradient checkpointing ENABLED (saves ~60-70% activation memory).
+[GNN] node_feat=89, hidden=128, layers=4, graph_tokens=8
+[Params] Trainable (GNN+Proj): 269,653,120 | Frozen (LLM): 8,030,269,440 | Ratio: 3.249%
+[GNN-Pretrain] Training on 1113 graphs, 50 epochs ...
+[GNN] node_feat=89, hidden=128, layers=4, graph_tokens=8
+[Params] Trainable (GNN+Proj): 269,653,120 | Frozen (LLM): 8,030,269,440 | Ratio: 3.249%
+[GNN-Pretrain] Training on 1113 graphs, 50 epochs ...
+[Params] Trainable (GNN+Proj): 269,653,120 | Frozen (LLM): 8,030,269,440 | Ratio: 3.249%
+[GNN-Pretrain] Training on 1113 graphs, 50 epochs ...
+  Epoch   1/50  loss=0.6570  best=0.6570
+  Epoch   1/50  loss=0.6570  best=0.6570
+  Epoch   5/50  loss=0.5944  best=0.5944
+  Epoch  10/50  loss=0.5842  best=0.5842
+  Epoch  15/50  loss=0.5574  best=0.5574
+  Epoch  20/50  loss=0.5506  best=0.5436
+  Epoch  25/50  loss=0.5480  best=0.5436
+  Epoch  30/50  loss=0.5496  best=0.5226
+  Epoch  35/50  loss=0.5109  best=0.5109
+  Epoch  40/50  loss=0.5106  best=0.5106
+  Epoch  45/50  loss=0.4946  best=0.4946
+  Epoch  50/50  loss=0.4882  best=0.4744
+[GNN-Pretrain] Done. best_loss=0.4744
+[GNN-Pretrain] Saved -> checkpoints/gnn_proteins.pt
 
 ============================================================
   [Joint Train] GNN + Projector (RAG-Augmented) (PROTEINS -> DD)
-  Train epochs=15, lr_gnn=5e-05, lr_proj=0.0002
+  Train epochs=11, lr_gnn=5e-05, lr_proj=0.0002
 ============================================================
   Train: 753, Val: 188, Test: 237 (held-out for evaluation)
   [RAG-Setup] Building temporary retrieval index from PROTEINS ...
   [RAG-Setup] Pre-retrieving for 753 samples ...
   [RAG-Setup] Pre-retrieving for 188 samples ...
-  Epoch 1/15  train_loss=2.4928  val_loss=1.0290  ← best ✓
-  Epoch 2/15  train_loss=0.7871  val_loss=0.8351  ← best ✓
-  Epoch 3/15  train_loss=0.7146  val_loss=0.8003  ← best ✓
-  Epoch 4/15  train_loss=0.6885  val_loss=0.6895  ← best ✓
-  Epoch 5/15  train_loss=0.6411  val_loss=5.3998  (patience 1/5)
-  Epoch 6/15  train_loss=0.8249  val_loss=0.6598  ← best ✓
-  Epoch 7/15  train_loss=0.6554  val_loss=0.8671  (patience 1/5)
-  Epoch 8/15  train_loss=0.6175  val_loss=1.0904  (patience 2/5)
-  Epoch 9/15  train_loss=0.6370  val_loss=0.6967  (patience 3/5)
-  Epoch 10/15  train_loss=0.5993  val_loss=0.7380  (patience 4/5)
-  Epoch 11/15  train_loss=0.5610  val_loss=0.7479  (patience 5/5)
+  Epoch 1/11  train_loss=1.9610  val_loss=1.4163  ← best ✓
+  Epoch 2/11  train_loss=0.7000  val_loss=1.2220  ← best ✓
+  Epoch 3/11  train_loss=0.6464  val_loss=0.9331  ← best ✓
+  Epoch 4/11  train_loss=0.6368  val_loss=0.8160  ← best ✓
+  Epoch 5/11  train_loss=0.6424  val_loss=0.7627  ← best ✓
+  Epoch 6/11  train_loss=0.6489  val_loss=0.6839  ← best ✓
+  Epoch 7/11  train_loss=0.6848  val_loss=0.7067  (patience 1/5)
+  Epoch 8/11  train_loss=0.6247  val_loss=0.9474  (patience 2/5)
+  Epoch 9/11  train_loss=0.7715  val_loss=0.8455  (patience 3/5)
+  Epoch 10/11  train_loss=0.6630  val_loss=1.0277  (patience 4/5)
+  Epoch 11/11  train_loss=0.5663  val_loss=0.9247  (patience 5/5)
   [Early Stopping] No improvement for 5 epochs, stopping.
-  [Joint Train] Best checkpoint saved -> checkpoints/proj_proteins_dd.pt (val_loss=0.6598)
+  [Joint Train] Best checkpoint saved -> checkpoints/proj_proteins_dd.pt (val_loss=0.6839)
 [Eval] Test set: 237 graphs (never seen during training)
 [RAG] Encoding 1113 source graphs ...
 [RAG] Indexed 1113 source graphs
-  [1-8/237] processing batch...[transformers] Ignoring clean_up_tokenization_spaces=True for BPE tokenizer TokenizersBackend. The clean_up_tokenization post-processing step is designed for WordPiece tokenizers and is destructive for BPE (it strips spaces before punctuation). Set clean_up_tokenization_spaces=False to suppress this warning, or set clean_up_tokenization_spaces_for_bpe_even_though_it_will_corrupt_output=True to force cleanup anyway.
-  [WARN] Repetitive digit pattern detected, using first digit -> 1  (len=6)
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.147, 59:+0.\n[4] sim=2:')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1: 50:+2.\n[4] sim=3+')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.139, 59:+0.\n[4] sim=2:')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.155, 59:+0.156: 50+2.')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.131: 59:+0.\n[4] sim=2+')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.174, 59:+0.\n[4] sim=2:')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1: 50:+2.\n[4] sim=3+')
+  [1-2/237] processing batch...[transformers] Ignoring clean_up_tokenization_spaces=True for BPE tokenizer TokenizersBackend. The clean_up_tokenization post-processing step is designed for WordPiece tokenizers and is destructive for BPE (it strips spaces before punctuation). Set clean_up_tokenization_spaces=False to suppress this warning, or set clean_up_tokenization_spaces_for_bpe_even_though_it_will_corrupt_output=True to force cleanup anyway.
+  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.\n``[5]+1+0.200')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1,+5+10%, 17')
  done.
-  [9-16/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.235, 50:+0.236 label=2:51+')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.139, 59:+0.\n[4] sim=2:')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.156, 59:+0.155')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.195, 59:+0.196:2+3=4')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.147, 58:+0.153]\n  [3] sim')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.139, 59:+0.\n[4] sim=2:')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.147, 59:+0.\n[4] sim=2)')
-  [WARN] No 'Answer: X' found, fallback -> 1  (response: '1.235: 59:+0.\n[4] sim=2+')
+  [3-4/237] processing batch...  [WARN] No 'Answer: X' found, fallback -> 0  (response: '0.185')
+  [WARN] No 'Answer: X' found, fallback -> 0  (response: '0.\n168')
  done.
-  [17-24/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.156, 59:+0.174:2+3=4')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1: 50:+2.\n[4] sim=3+')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.117, 59:+0.\n2) sim=3+4')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.147, 51:+0.\n[4] sim=2:')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1. 0,50:+[2] .')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.147, 59:+0.240 label=2:50+')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.174, 50:+0.\nReference: (source) sim=')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1, 50:+2')
+  [5-6/237] processing batch...  [WARN] No 'Answer: X' found, fallback -> 0  (response: '0.283')
+  [WARN] No 'Answer: X' found, fallback -> 0  (response: '0.\n``[5], 54：58，57+, 68+:')
  done.
-  [25-32/237] processing batch...  [WARN] Repetitive digit pattern detected, using first digit -> 1  (len=7)
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.173: 50:+0.\n[4] sim=2+')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1951 59:+2.\n[4] sim=3+')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1: 50:+2.')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.151, 50:+0.')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.153: 59:+0.\n[4] sim=2+')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1: 50:+2')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.156, 59:+0.\n[4] sim=2.+')
+  [7-8/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1 +5%+10%, 17')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.\n``[5]+10')
  done.
-  [33-40/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1: 50:+2.\n[4] sim=3+')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.177, 58:+0.153,\n] [4]\nReference')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.173, 50:+0.\n[4]+2.+3+')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1: 50:+2')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1+4=2.+3: 59:+0.\n[')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.141, 59:+0.\n[4] sim=2:')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1+4: 50:+2.\n[3] sim=')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.161, 59:+0.\n[4] sim=2:')
+  [9-10/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.\n``[5], 54：+0， +0。168')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.\n``170：48，49+0。165')
  done.
-  [41-48/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.131, 80:+0.\nReference graphs (source: Protein Structure')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.243| 50:+0.\n[4] sim=2+')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.139, 59:+0.140:2+3=4')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.123, 9:+0.\n[4] sim=2:')
-  [WARN] Repetitive digit pattern detected, using first digit -> 1  (len=6)
-  [WARN] Repetitive digit pattern detected, using first digit -> 1  (len=6)
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.174, 50:+0.175')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.156, 59:+0.\n[4] sim=2:')
+  [11-12/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1+9.\n 47,+10')
+  [WARN] No 'Answer: X' found, fallback -> 0  (response: '0.207')
  done.
-  [49-56/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.243, 50:+0.\n[4] sim=2:')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1 50:+2:51,')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.238; 50:+0.\n[4] sim=2:')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.150: 59:+0.\n[4] sim=2+')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.149, 59:+0.150')
-  [WARN] Repetitive digit pattern detected, using first digit -> 1  (len=8)
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.156, 59:+0.\n[4] sim=2:')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.238; 80:+0.\n[4] sim=1+')
+  [13-14/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.\n`` `` +1，sim+1：1。')
+  [WARN] No 'Answer: X' found, fallback -> 0  (response: '0.245')
  done.
-  [57-64/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1 50:+2')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.233, 50:+0.234]\nf[3] sim')
-  [WARN] No 'Answer: X' found, fallback -> 1  (response: '1.283, 74:+0.282;')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.195, 59:+0.\n[4] sim=2:')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.173: 50:+0.\n[4] sim=2.+')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.195, 59:+0.\n[4] sim=2+')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.173, 50:+0.174')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1, 50:+0.\nReference graphs (source: 4')
+  [15-16/237] processing batch...  [WARN] No 'Answer: X' found, fallback -> 1  (response: '1+5% of proteins')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.\n``[5], 54：+0，208+, 17')
  done.
-  [65-72/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.149, 59:+0.235; 74:2+')
-  [WARN] Repetitive digit pattern detected, using first digit -> 1  (len=6)
-  [WARN] No 'Answer: X' found, fallback -> 0  (response: '0.1')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.131, 59:+0.\n[4] sim=2:')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.156, 59:+0.\n[4] sim=1+')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.150, 59:+0.\n[4] sim=2:')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.147, 74:+0.145,\n  [3] sim')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1: 50:+2')
+  [17-18/237] processing batch...  [WARN] No 'Answer: X' found, fallback -> 0  (response: '0.\n``[5], 54：sim+0， 56')
+  [WARN] No 'Answer: X' found, fallback -> 0  (response: '0.208')
  done.
-  [73-80/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.143, 50:+1.\n[4] sim=2:')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.239; 50:+0.\n[4] sim=2:')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.150: 59:+0.\n[4] sim=2+')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.200, 59:+0.\n[4] sim=2:')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.131, 59:+0.243 label=2:51+')
-  [WARN] Repetitive digit pattern detected, using first digit -> 1  (len=6)
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.139, 59:+0.\n[4] sim=2:')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.150, 59:+0.\n[4] sim=2:')
+  [19-20/237] processing batch...  [WARN] Repetitive digit pattern detected, using first digit -> 0  (len=6)
+  [WARN] No 'Answer: X' found, fallback -> 1  (response: '1,+5%+6%, +7')
  done.
-  [81-88/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.175, 59:+0.\n[4] sim=2:')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.1: 50:+2,51:-3')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.159: 59:+0.\n156+2) sim=1')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.287, 50:+0.\n[4] sim=2:')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.238; 50:+0.\n\n[2] sim=1+')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.173, 58:+0.\n[4] sim=1+')
-  [WARN] No 'Answer: X' found, fallback -> 1  (response: '1.237; 59:+0.\n\n238: 74+2.')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.139, 59:+0.239;')
+  [21-22/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.\n[5]+1.+208, 65+9.188')
+  [WARN] No 'Answer: X' found, fallback -> 1  (response: '1+5% : +6%, 68+:7+,71')
  done.
-  [89-96/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.131, 59:+0.\n[4] sim=2:')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.156, 59:+0.\n[4] sim=2:')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.136, 59:+0.137]')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.159: 59:+0.\n\n156+2] sim=4')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.270: 81:+0.\n240| 74+2.')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.239; 81:+0.\n[4] sim=1+')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.238; 74:+0.\n[4] sim=1+')
-  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1.155, 59:+0.156')
+  [23-24/237] processing batch...  [WARN] No 'Answer: X' found, fallback -> 1  (response: '1 :+5')
+  [WARN] No 'Answer: X' found, fallback -> 1  (response: '1"+0')
  done.
+  [25-26/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.\n    ,17：sim+0， 18')
+  [WARN] No 'Answer: X' found, fallback -> 0  (response: '0.245')
+ done.
+  [27-28/237] processing batch...  [WARN] No 'Answer: X' found, fallback -> 0  (response: '0.189')
+  [WARN] Repetitive digit pattern detected, using first digit -> 0  (len=7)
+ done.
+  [29-30/237] processing batch...  [WARN] No 'Answer: X' found, fallback -> 0  (response: '0.193')
+  [WARN] No 'Answer: X' found, fallback -> 0  (response: '0.185')
+ done.
+  [31-32/237] processing batch...  [WARN] No 'Answer: X' found, fallback -> 0  (response: '0.208')
+  [WARN] No 'Answer: X' found, fallback -> 0  (response: '0.208')
+ done.
+  [33-34/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.\n``[5], 48：sim+0，17+,18')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1 "+5%+6%, +23:-10%.')
+ done.
+  [35-36/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.\n`` +0，185：17+18')
+  [WARN] Repetitive digit pattern detected, using first digit -> 0  (len=6)
+ done.
+  [37-38/237] processing batch...  [WARN] No 'Answer: X' found, fallback -> 0  (response: '一、 48：49，50')
+  [WARN] No 'Answer: X' found, fallback -> 1  (response: '1,+5%+6%, +8+, 77')
+ done.
+  [39-40/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.\n`` +0，54：+0。165')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1"+1″+10')
+ done.
+  [41-42/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1+5%,\n 17：sim=1,+6%, 80')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.\n`` +0， 23：24+0。208')
+ done.
+  [43-44/237] processing batch...  [WARN] No 'Answer: X' found, fallback -> 0  (response: '0.168')
+  [WARN] No 'Answer: X' found, fallback -> 1  (response: '1,+5+9')
+ done.
+  [45-46/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 0  (response: '0.197,\n 17+1、168')
+  [WARN] No 'Answer: X' found, fallback -> 0  (response: '0.184')
+ done.
+  [47-48/237] processing batch...  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1+0.\n168')
+  [WARN] No 'Answer: X' found, fallback to first digit -> 1  (response: '1+5% ,77,+11')

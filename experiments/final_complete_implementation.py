@@ -50,9 +50,10 @@ from dataset.mol_graph_utils import (
 )
 
 # 默认使用 ModelScope 模型 ID，可通过环境变量覆盖
+# 注意：必须用 Instruct 版本！Base model 只会续写文本，不会遵循指令
 MODELSCOPE_MODEL_ID = os.getenv(
     'MODELSCOPE_MODEL_ID',
-    'LLM-Research/Meta-Llama-3.1-8B',
+    'LLM-Research/Meta-Llama-3.1-8B-Instruct',
 )
 
 # 默认下载缓存目录放在项目 checkpoints/modelscope
