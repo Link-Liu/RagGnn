@@ -498,24 +498,31 @@ class LocalLLMInterface:
         batch_results = []
         for content in results:
             content = content.strip()
-            # 从完整输出中提取 "Answer: 0/1"（取最后一个匹配，因为完整输出包含 prompt）
-            matches = re.findall(r'Answer\s*:\s*([01])', content, re.IGNORECASE)
-            if matches:
-                prediction = int(matches[-1])  # 取最后一个匹配（即模型生成的）
+            
+            # inputs_embeds 模式下，generate() 只输出新生成的 token（不含 prompt）
+            # 所以输出通常就是 "0" 或 "1"（可能带空格或换行）
+            
+            # 策略 1：直接匹配输出开头的 0 或 1（最高置信度）
+            head_match = re.match(r'\s*([01])\b', content)
+            if head_match:
+                prediction = int(head_match.group(1))
+                confidence = 1.0
+            # 策略 2：如果输出包含 "Answer: X"（兼容完整 decode 的情况）
+            elif re.search(r'Answer\s*:\s*([01])', content, re.IGNORECASE):
+                matches = re.findall(r'Answer\s*:\s*([01])', content, re.IGNORECASE)
+                prediction = int(matches[-1])
                 confidence = 1.0
             else:
-                # 取输出末尾的数字作为 fallback
-                # 完整输出中末尾就是模型新生成的部分
-                tail = content[-30:] if len(content) > 30 else content
-                tail_digits = re.findall(r'[01]', tail)
-                if tail_digits:
-                    prediction = int(tail_digits[-1])
+                # 策略 3：在整个输出中找任意 0/1
+                all_digits = re.findall(r'[01]', content)
+                if all_digits:
+                    prediction = int(all_digits[0])  # 取第一个
                     confidence = 0.5
-                    print(f"  [WARN] No 'Answer: X' found, tail fallback -> {prediction}  (tail: {tail!r})")
+                    print(f"  [WARN] Unexpected output format, fallback -> {prediction}  (output: {content[:50]!r})")
                 else:
                     prediction = np.random.randint(0, 2)
                     confidence = 0.1
-                    print(f"  [WARN] Cannot determine label, random fallback -> {prediction}  (tail: {tail!r})")
+                    print(f"  [WARN] No 0/1 found, random -> {prediction}  (output: {content[:50]!r})")
             
             batch_results.append({
                 'prediction': prediction,
