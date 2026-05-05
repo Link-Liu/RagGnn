@@ -367,6 +367,8 @@ class LocalLLMInterface:
         embed_fn = self.llm.get_input_embeddings()
         bos_embed = embed_fn(torch.tensor([self.tokenizer.bos_token_id], device=self.device))  # [1, D]
         pad_embed = embed_fn(torch.tensor([self.tokenizer.pad_token_id], device=self.device))  # [1, D]
+        # 统一 dtype：Projector 输出 Float32，LLM embedding 输出 BFloat16
+        soft_tokens = soft_tokens.to(bos_embed.dtype)
 
         # 4. 逐样本手动拼接 embeddings
         batch_inputs_embeds = []
@@ -443,6 +445,8 @@ class LocalLLMInterface:
         embed_fn = self.llm.get_input_embeddings()
         bos_embed = embed_fn(torch.tensor([self.tokenizer.bos_token_id], device=self.device))
         pad_embed = embed_fn(torch.tensor([self.tokenizer.pad_token_id], device=self.device))
+        # 统一 dtype
+        soft_tokens = soft_tokens.to(bos_embed.dtype)
 
         B = len(prompts)
         batch_inputs_embeds = []
