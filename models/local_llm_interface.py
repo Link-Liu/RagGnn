@@ -83,16 +83,25 @@ class GINEncoder(nn.Module):
 # Graph Projector：GNN 嵌入 → LLM 词嵌入空间
 # ============================================================
 class GraphProjector(nn.Module):
-    """参考 GraphPrompter 的 Projector 架构：Linear → Sigmoid → Linear"""
+    """
+    改进版 Projector，参考 LLaVA 的 MLP Projector。
+    
+    相比原版（Linear→Sigmoid→Linear）的改进：
+      - GELU 替代 Sigmoid：避免梯度饱和，梯度信号更强
+      - 加入 LayerNorm：稳定训练过程
+      - 增加网络深度：更强的映射能力
+    """
     def __init__(self, gnn_dim: int, llm_dim: int, num_tokens: int = 8):
         super().__init__()
         self.num_tokens = num_tokens
         self.llm_dim = llm_dim
-        # GraphPrompter 风格: gnn_dim → mid → llm_dim * num_tokens
-        mid_dim = min(gnn_dim * 4, llm_dim)  # 512*4=2048, cap at llm_dim
+        mid_dim = min(gnn_dim * 4, llm_dim)
         self.proj = nn.Sequential(
             nn.Linear(gnn_dim, mid_dim),
-            nn.Sigmoid(),
+            nn.GELU(),
+            nn.LayerNorm(mid_dim),
+            nn.Linear(mid_dim, mid_dim),
+            nn.GELU(),
             nn.Linear(mid_dim, llm_dim * num_tokens),
         )
 
@@ -303,13 +312,28 @@ class LocalLLMInterface:
         pyg_batch,
         prompts: List[str],
         labels_text: List[str],
-        cls_weight: float = 0.7,
-        gen_weight: float = 0.3,
+        cls_weight: float = 0.3,
+        gen_weight: float = 0.7,
+        epoch: int = 0,
+        total_epochs: int = 1,
     ) -> torch.Tensor:
         """
-        混合 loss：分类头直接 loss + 生成式 loss。
-        分类 loss 直接作用于 GNN+Projector，不需要穿透冻结 LLM。
-        生成式 loss 让 soft token 在 LLM 空间中学习有意义的表示。
+        混合 loss：分类头辅助 loss + 生成式 loss。
+        
+        核心设计：
+          - 生成式 loss 是主信号（训练 Projector，让 LLM 理解 soft token）
+          - 分类头 loss 是辅助信号（帮助 GNN 快速学到好的图表示）
+          - 渐进退火：前期分类头权重较高帮 GNN 热身，后期生成式 loss 主导
+        
+        梯度流向：
+          cls_loss → classifier_head → graph_emb → GNN  (不经过 Projector)
+          gen_loss → LLM(frozen) → soft_tokens → Projector → graph_emb → GNN
+        
+        Args:
+            cls_weight: 分类头 loss 的基础权重（会被退火调低）
+            gen_weight: 生成式 loss 的基础权重（会被退火调高）
+            epoch:        当前训练轮次（用于退火调度）
+            total_epochs: 总训练轮次
         """
         B = pyg_batch.num_graphs
 
@@ -317,14 +341,14 @@ class LocalLLMInterface:
         graph_emb = self._encode_graph(pyg_batch)          # [B, hidden]
         soft_tokens = self._get_soft_tokens(graph_emb)     # [B, num_tok, llm_dim]
 
-        # ========== 分类头 loss（强信号，直接训练 GNN）==========
+        # ========== 分类头 loss（辅助信号，训练 GNN）==========
         cls_logits = self.classifier_head(graph_emb)       # [B, 2]
         cls_labels = torch.tensor(
             [int(l) for l in labels_text], device=self.device, dtype=torch.long
         )
         cls_loss = nn.functional.cross_entropy(cls_logits, cls_labels)
 
-        # ========== 生成式 loss（弱信号，让 soft token 在 LLM 空间有意义）==========
+        # ========== 生成式 loss（主信号，训练 Projector + GNN）==========
         # 2. 用 chat template 包装后 tokenize
         wrapped = self._wrap_chat_template(prompts)
         text_enc = self.tokenizer(wrapped, add_special_tokens=False)
@@ -377,8 +401,14 @@ class LocalLLMInterface:
         )
         gen_loss = outputs.loss
 
-        # ========== 混合 loss ==========
-        total_loss = cls_weight * cls_loss + gen_weight * gen_loss
+        # ========== 渐进退火：分类头权重逐渐降低，生成式 loss 逐渐升高 ==========
+        # 前期：cls 帮助 GNN 快速学到好的图表示
+        # 后期：gen_loss 主导，让 Projector 充分学习 LLM 空间映射
+        progress = epoch / max(total_epochs, 1)
+        effective_cls_w = cls_weight * max(0.1, 1.0 - progress)   # 逐渐降到 cls_weight * 0.1
+        effective_gen_w = gen_weight + cls_weight * min(0.9, progress)  # 逐渐吸收 cls 的权重
+
+        total_loss = effective_cls_w * cls_loss + effective_gen_w * gen_loss
         return total_loss
 
     # ----------------------------------------------------------
@@ -494,6 +524,173 @@ class LocalLLMInterface:
                 'confidence': confidence,
                 'response': content,
                 'tokens_used': 0,
+            })
+        return batch_results
+
+    # ----------------------------------------------------------
+    # 方案1: 分类头直接推理（训练-推理一致性修复）
+    # ----------------------------------------------------------
+    @torch.no_grad()
+    def predict_with_classifier(self, pyg_batch) -> List[Dict]:
+        """
+        使用 classifier_head 直接预测，不经过 LLM generate。
+        
+        训练时 classifier_head 占 70% 的 loss 权重，
+        因此它应该是最可靠的预测信号。
+        """
+        self.call_count += pyg_batch.num_graphs
+        graph_emb = self._encode_graph(pyg_batch)              # [B, hidden]
+        cls_logits = self.classifier_head(graph_emb)            # [B, 2]
+        cls_probs = F.softmax(cls_logits, dim=-1)               # [B, 2]
+        cls_preds = cls_logits.argmax(dim=-1).cpu().tolist()     # [B]
+        
+        batch_results = []
+        for i in range(pyg_batch.num_graphs):
+            prob_0 = cls_probs[i, 0].item()
+            prob_1 = cls_probs[i, 1].item()
+            pred = cls_preds[i]
+            batch_results.append({
+                'prediction': pred,
+                'confidence': max(prob_0, prob_1),
+                'response': str(pred),
+                'prob_0': prob_0,
+                'prob_1': prob_1,
+                'tokens_used': 0,
+                'method': 'classifier_head',
+            })
+        return batch_results
+
+    # ----------------------------------------------------------
+    # 方案3: LLM logits 分类（替代 generate）
+    # ----------------------------------------------------------
+    @torch.no_grad()
+    def _get_llm_classification_logits(self, pyg_batch, prompts: List[str]) -> torch.Tensor:
+        """
+        用 LLM 的 next-token logits 做分类，不需要 generate。
+        
+        直接取 LLM 在序列最后一个位置对 "0" 和 "1" token 的 logits，
+        比 generate + regex 更快、更精确。
+        
+        Returns:
+            binary_logits: [B, 2]  对 "0" 和 "1" 两个 token 的 logits
+        """
+        graph_emb = self._encode_graph(pyg_batch)
+        soft_tokens = self._get_soft_tokens(graph_emb)
+
+        wrapped = self._wrap_chat_template(prompts)
+        text_enc = self.tokenizer(wrapped, add_special_tokens=False)
+
+        embed_fn = self.llm.get_input_embeddings()
+        bos_embed = embed_fn(torch.tensor([self.tokenizer.bos_token_id], device=self.device))
+        pad_embed = embed_fn(torch.tensor([self.tokenizer.pad_token_id], device=self.device))
+        soft_tokens = soft_tokens.to(bos_embed.dtype)
+
+        B = len(prompts)
+        batch_inputs_embeds = []
+        batch_attention_mask = []
+
+        for i in range(B):
+            text_ids_i = text_enc.input_ids[i][:self.max_txt_len]
+            text_embeds = embed_fn(torch.tensor(text_ids_i, device=self.device))
+            seq_embeds = torch.cat([bos_embed, soft_tokens[i], text_embeds], dim=0)
+            batch_inputs_embeds.append(seq_embeds)
+            batch_attention_mask.append([1] * seq_embeds.shape[0])
+
+        max_length = max(x.shape[0] for x in batch_inputs_embeds)
+        for i in range(B):
+            pad_len = max_length - batch_inputs_embeds[i].shape[0]
+            if pad_len > 0:
+                batch_inputs_embeds[i] = torch.cat([pad_embed.repeat(pad_len, 1), batch_inputs_embeds[i]])
+                batch_attention_mask[i] = [0] * pad_len + batch_attention_mask[i]
+
+        inputs_embeds = torch.stack(batch_inputs_embeds, dim=0)
+        attention_mask = torch.tensor(batch_attention_mask, device=self.device)
+
+        # LLM 前向（不 generate，只取 logits）
+        outputs = self.llm(
+            inputs_embeds=inputs_embeds,
+            attention_mask=attention_mask,
+            return_dict=True,
+            use_cache=False,
+        )
+
+        # 取每个序列最后一个非 padding 位置的 logits
+        last_logits = outputs.logits[:, -1, :]  # [B, vocab_size]
+
+        # 获取 "0" 和 "1" 对应的 token ID
+        token_0_id = self.tokenizer.encode("0", add_special_tokens=False)[0]
+        token_1_id = self.tokenizer.encode("1", add_special_tokens=False)[0]
+
+        binary_logits = last_logits[:, [token_0_id, token_1_id]]  # [B, 2]
+        return binary_logits
+
+    @torch.no_grad()
+    def predict_with_llm_logits(self, pyg_batch, prompts: List[str]) -> List[Dict]:
+        """
+        用 LLM logits 做分类（替代 generate + regex）。
+        """
+        self.call_count += len(prompts)
+        binary_logits = self._get_llm_classification_logits(pyg_batch, prompts)
+        probs = F.softmax(binary_logits, dim=-1)  # [B, 2]
+        preds = binary_logits.argmax(dim=-1).cpu().tolist()
+
+        batch_results = []
+        for i in range(len(prompts)):
+            prob_0 = probs[i, 0].item()
+            prob_1 = probs[i, 1].item()
+            batch_results.append({
+                'prediction': preds[i],
+                'confidence': max(prob_0, prob_1),
+                'response': str(preds[i]),
+                'prob_0': prob_0,
+                'prob_1': prob_1,
+                'tokens_used': 0,
+                'method': 'llm_logits',
+            })
+        return batch_results
+
+    # ----------------------------------------------------------
+    # 方案2: 集成推理（分类头 + LLM logits）
+    # ----------------------------------------------------------
+    @torch.no_grad()
+    def predict_batch_ensemble(
+        self, pyg_batch, prompts: List[str],
+        cls_weight: float = 0.6, llm_weight: float = 0.4,
+    ) -> List[Dict]:
+        """
+        集成推理：融合 classifier_head 和 LLM logits 的概率。
+        
+        Args:
+            cls_weight: 分类头概率的权重
+            llm_weight: LLM logits 概率的权重
+        """
+        self.call_count += len(prompts)
+
+        # 路径 A: 分类头
+        graph_emb = self._encode_graph(pyg_batch)
+        cls_logits = self.classifier_head(graph_emb)       # [B, 2]
+        cls_probs = F.softmax(cls_logits, dim=-1)           # [B, 2]
+
+        # 路径 B: LLM logits
+        llm_logits = self._get_llm_classification_logits(pyg_batch, prompts)  # [B, 2]
+        llm_probs = F.softmax(llm_logits, dim=-1)           # [B, 2]
+
+        # 加权融合
+        final_probs = cls_weight * cls_probs + llm_weight * llm_probs  # [B, 2]
+        preds = final_probs.argmax(dim=-1).cpu().tolist()
+
+        batch_results = []
+        for i in range(len(prompts)):
+            batch_results.append({
+                'prediction': preds[i],
+                'confidence': final_probs[i].max().item(),
+                'response': str(preds[i]),
+                'prob_0': final_probs[i, 0].item(),
+                'prob_1': final_probs[i, 1].item(),
+                'cls_prob_1': cls_probs[i, 1].item(),
+                'llm_prob_1': llm_probs[i, 1].item(),
+                'tokens_used': 0,
+                'method': 'ensemble',
             })
         return batch_results
 

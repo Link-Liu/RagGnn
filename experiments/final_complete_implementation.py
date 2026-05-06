@@ -206,51 +206,53 @@ class TransferExperiment:
         return src_list, tgt_list, unified_dim, edge_dim
 
     # ------------------------------------------------------------------
-    # Phase 2: 联合训练 GNN + Projector（通过冻结 LLM 的 CE loss）
+    # Phase 2: 联合训练 GNN + Projector（纯源域数据，不使用目标域标签）
     # ------------------------------------------------------------------
     def _joint_train(
         self,
-        tgt_list: List,
         src_list: List,
-        target_name: str,
         source_name: str,
+        target_name: str,
         ckpt_proj: str,
-        train_epochs: int = 50,       # 增加训练轮数，让 projector 充分学习
-        train_batch_size: int = 1,    # 显存紧张，单样本前向
+        train_epochs: int = 50,
+        train_batch_size: int = 1,
         lr_gnn: float = 5e-5,
         lr_proj: float = 2e-4,
-        grad_accum_steps: int = 16,   # 等效 batch_size = 1*16 = 16
-        train_ratio: float = 0.64,
-        val_ratio: float = 0.16,
-    ) -> List[int]:
+        grad_accum_steps: int = 16,
+        train_ratio: float = 0.8,
+    ):
         """
-        用目标域的标签数据，联合训练 GNN + Projector。
-        训练时引入 RAG 例子以对齐推理阶段。
+        用源域的标签数据联合训练 GNN + Projector。
+        
+        纯跨域迁移设定：
+          - 训练数据 100% 来自源域
+          - 目标域完全没有标签，不参与训练
+          - RAG 检索也来自源域（训练时用留一法）
         """
         import random
         from torch_geometric.data import Batch as PyGBatch
 
         print(f"\n{'='*60}")
-        print(f"  [Joint Train] GNN + Projector (RAG-Augmented) ({source_name} -> {target_name})")
+        print(f"  [Joint Train] GNN + Projector — SOURCE DOMAIN ONLY")
+        print(f"  {source_name} -> {target_name}")
         print(f"  Train epochs={train_epochs}, lr_gnn={lr_gnn}, lr_proj={lr_proj}")
         print(f"{'='*60}")
 
-        prop_desc = self.PROP_DESC.get(target_name.lower(), target_name)
+        prop_desc = self.PROP_DESC.get(source_name.lower(), source_name)
 
-        # ---- 划分数据集 ----
-        indices = list(range(len(tgt_list)))
+        # ---- 划分源域数据：80% 训练 / 20% 验证 ----
+        indices = list(range(len(src_list)))
         random.seed(42)
         random.shuffle(indices)
         n_train = int(train_ratio * len(indices))
-        n_val   = int(val_ratio * len(indices))
         train_indices = indices[:n_train]
-        val_indices   = indices[n_train: n_train + n_val]
-        test_indices  = indices[n_train + n_val:]
-        print(f"  Train: {len(train_indices)}, Val: {len(val_indices)}, "
-              f"Test: {len(test_indices)} (held-out for evaluation)")
+        val_indices   = indices[n_train:]
+        print(f"  Source domain: {len(src_list)} graphs total")
+        print(f"  Train: {len(train_indices)}, Val: {len(val_indices)}")
+        print(f"  Target domain: NOT used for training (pure cross-domain)")
 
-        # ---- 构建 RAG 预检索索引（使用当前预训练 GNN） ----
-        print(f"  [RAG-Setup] Building temporary retrieval index from {source_name} ...")
+        # ---- 构建 RAG 检索索引（源域全量） ----
+        print(f"  [RAG-Setup] Building retrieval index from {source_name} ...")
         self.llm.gnn.eval()
         src_embs, src_labels = _encode_dataset_with_llm(self.llm, src_list, self.device)
         src_infos = []
@@ -262,37 +264,39 @@ class TransferExperiment:
         retriever = GraphRetriever(embedding_dim=self.hidden_dim)
         retriever.add_source_graphs(src_embs, src_infos, src_labels)
 
-        # ---- 为训练/验证集预先检索例子 ----
-        def pre_retrieve(dataset_indices):
-            print(f"  [RAG-Setup] Pre-retrieving for {len(dataset_indices)} samples ...")
+        # ---- 为训练/验证集预先检索（留一法：排除自身） ----
+        def pre_retrieve_source(dataset_indices):
+            print(f"  [RAG-Setup] Pre-retrieving for {len(dataset_indices)} source samples ...")
             results = {}
             for idx in dataset_indices:
-                data = tgt_list[idx]
+                data = src_list[idx]
                 emb = _encode_single_graph(self.llm, data, self.device)
-                info = extract_graph_info(data, f"{target_name}_{idx}", target_name)
-                retrieved = retriever.retrieve_similar_graphs(emb, info, k=5)
+                info = extract_graph_info(data, f"{source_name}_{idx}", source_name)
+                retrieved = retriever.retrieve_similar_graphs(emb, info, k=6)
+                retrieved = [r for r in retrieved
+                           if r.get('graph_id') != f"{source_name}_{idx}"][:5]
                 results[idx] = retrieved
             return results
 
-        train_rag_cache = pre_retrieve(train_indices)
-        val_rag_cache = pre_retrieve(val_indices)
+        train_rag_cache = pre_retrieve_source(train_indices)
+        val_rag_cache = pre_retrieve_source(val_indices)
 
-        # ---- 封装带 RAG 的自定义 Dataset ----
+        # ---- 封装 Dataset（源域数据） ----
         class RAGDataset(torch.utils.data.Dataset):
             def __init__(self, indices, rag_cache):
                 self.indices = indices
                 self.rag_cache = rag_cache
-                self.labels = [int(tgt_list[idx].y.item()) for idx in indices]
+                self.labels = [int(src_list[idx].y.item()) for idx in indices]
             def __len__(self): return len(self.indices)
             def __getitem__(self, i):
                 idx = self.indices[i]
-                return tgt_list[idx], self.rag_cache[idx]
+                return src_list[idx], self.rag_cache[idx]
 
         def collate_rag(batch_samples):
             data_list, rag_list = zip(*batch_samples)
             return PyGBatch.from_data_list(data_list), rag_list
 
-        # ---- 平衡采样逻辑 (A7: 解决 F1 低的问题) ----
+        # ---- 平衡采样 ----
         train_dataset = RAGDataset(train_indices, train_rag_cache)
         labels = train_dataset.labels
         class_sample_count = np.array([len(np.where(labels == t)[0]) for t in np.unique(labels)])
@@ -318,7 +322,6 @@ class TransferExperiment:
             {"params": self.llm.projector.parameters(), "lr": lr_proj},
         ], weight_decay=1e-5)
 
-        # ---- 学习率调度器（Cosine Annealing + Warmup）----
         total_steps = train_epochs * max(len(train_loader), 1)
         warmup_steps = max(total_steps // 5, 1)
         def lr_lambda(step):
@@ -331,10 +334,10 @@ class TransferExperiment:
         best_val_loss = float("inf")
         best_state = None
         patience_counter = 0
-        patience_limit = 10  # Early stopping patience（50 epoch 需要更大 patience）
+        patience_limit = 10
         use_amp = self.device == "cuda"
 
-        # ---- 训练循环 ----
+        # ---- 训练循环（纯源域数据） ----
         for epoch in range(1, train_epochs + 1):
             self.llm.gnn.train()
             self.llm.projector.train()
@@ -346,19 +349,22 @@ class TransferExperiment:
                 B = batch.num_graphs
                 prompts = []
                 for i in range(B):
-                    info = extract_graph_info(batch[i], "train", target_name)
+                    info = extract_graph_info(batch[i], "train", source_name)
                     p = create_detailed_prompt(
                         target_graph_info=info,
                         retrieved_examples=rag_examples_list[i],
                         property_description=prop_desc,
-                        target_dataset=target_name.lower(),
+                        target_dataset=source_name.lower(),
                         source_dataset=source_name.lower(),
                     )
                     prompts.append(p)
                 
                 labels_text = [str(int(y.item())) for y in batch.y]
                 with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.bfloat16):
-                    loss = self.llm.compute_loss(batch, prompts, labels_text)
+                    loss = self.llm.compute_loss(
+                        batch, prompts, labels_text,
+                        epoch=epoch, total_epochs=train_epochs,
+                    )
                     loss = loss / grad_accum_steps
 
                 loss.backward()
@@ -376,7 +382,7 @@ class TransferExperiment:
                 optimizer.zero_grad()
             avg_train_loss = epoch_loss / max(n_steps, 1)
 
-            # ---- 验证阶段 ----
+            # ---- 验证（源域验证集） ----
             self.llm.gnn.eval()
             self.llm.projector.eval()
             val_loss, val_steps = 0.0, 0
@@ -386,19 +392,22 @@ class TransferExperiment:
                     B = batch.num_graphs
                     prompts = []
                     for i in range(B):
-                        info = extract_graph_info(batch[i], "val", target_name)
+                        info = extract_graph_info(batch[i], "val", source_name)
                         p = create_detailed_prompt(
                             target_graph_info=info,
                             retrieved_examples=rag_examples_list[i],
                             property_description=prop_desc,
-                            target_dataset=target_name.lower(),
+                            target_dataset=source_name.lower(),
                             source_dataset=source_name.lower(),
                         )
                         prompts.append(p)
                     
                     labels_text = [str(int(y.item())) for y in batch.y]
                     with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.bfloat16):
-                        loss = self.llm.compute_loss(batch, prompts, labels_text)
+                        loss = self.llm.compute_loss(
+                            batch, prompts, labels_text,
+                            epoch=epoch, total_epochs=train_epochs,
+                        )
                         val_loss += loss.item()
                         val_steps += 1
 
@@ -430,17 +439,16 @@ class TransferExperiment:
             self.llm.projector.to(self.device)
             self.llm.classifier_head.to(self.device)
             Path(ckpt_proj).parent.mkdir(parents=True, exist_ok=True)
-            best_state["test_indices"] = test_indices
             torch.save(best_state, ckpt_proj)
             print(f"  [Joint Train] Best checkpoint saved -> {ckpt_proj} (val_loss={best_val_loss:.4f})")
 
         self.llm.gnn.eval()
         self.llm.projector.eval()
         self.llm.classifier_head.eval()
-        return test_indices
 
     def run_transfer(self, source_name: str, target_name: str,
-                     sample_size: int = 50, eval_batch_size: int = 4) -> Dict:
+                     sample_size: int = 50, eval_batch_size: int = 4,
+                     infer_method: str = 'llm_logits') -> Dict:
         """
         运行单个迁移学习实验: source_name -> target_name
         """
@@ -481,28 +489,11 @@ class TransferExperiment:
                 ckpt=ckpt_gnn,
             )
 
-        # 4. ========== 联合训练 GNN + Projector（通过冻结 LLM 的 CE loss）==========
-        #    返回 test_indices（从未参与训练/验证的样本，用于评估）
+        # 4. ========== 联合训练 GNN + Projector（纯源域数据） ==========
         if not Path(ckpt_proj).exists():
-            test_indices = self._joint_train(
-                tgt_list, src_list, target_name, source_name, ckpt_proj
+            self._joint_train(
+                src_list, source_name, target_name, ckpt_proj
             )
-        else:
-            # 从已保存的 checkpoint 恢复 test_indices
-            ckpt_data = torch.load(ckpt_proj, map_location='cpu')
-            test_indices = ckpt_data.get('test_indices', None)
-            if test_indices is None:
-                # 兼容旧 checkpoint：用相同 seed 重新划分
-                import random
-                indices = list(range(len(tgt_list)))
-                random.seed(42)
-                random.shuffle(indices)
-                n_train = int(0.64 * len(indices))
-                n_val   = int(0.16 * len(indices))
-                test_indices = indices[n_train + n_val:]
-                print(f"[WARN] test_indices not in checkpoint, re-derived {len(test_indices)} test samples")
-
-        print(f"[Eval] Test set: {len(test_indices)} graphs (never seen during training)")
 
         # 5. 编码源域 → 构建 RAG 索引
         print(f"[RAG] Encoding {len(src_list)} source graphs ...")
@@ -517,9 +508,10 @@ class TransferExperiment:
         retriever.add_source_graphs(src_embs, src_infos, src_labels)
         print(f"[RAG] Indexed {len(src_embs)} source graphs")
 
-        # 6. 仅在 test_indices（held-out）上评估
-        n_target = len(test_indices)
-        target_indices = test_indices
+        # 6. 在目标域全量数据上评估（纯跨域：目标域未参与任何训练）
+        n_target = len(tgt_list)
+        target_indices = list(range(n_target))
+        print(f"[Eval] Evaluating on ALL {n_target} target domain graphs (none used in training)")
 
         prop_desc = self.PROP_DESC.get(target_name.lower(), target_name)
         predictions, true_labels, details = [], [], []
@@ -564,8 +556,15 @@ class TransferExperiment:
                     )
                     batch_prompts.append(prompt)
 
-                # LLM 推理（已经是批量）
-                results = self.llm.predict_batch(pyg_batch, batch_prompts)
+                # 根据 infer_method 选择推理方式
+                if infer_method == 'classifier':
+                    results = self.llm.predict_with_classifier(pyg_batch)
+                elif infer_method == 'llm_logits':
+                    results = self.llm.predict_with_llm_logits(pyg_batch, batch_prompts)
+                elif infer_method == 'ensemble':
+                    results = self.llm.predict_batch_ensemble(pyg_batch, batch_prompts)
+                else:  # 'generate' — 原始方式
+                    results = self.llm.predict_batch(pyg_batch, batch_prompts)
 
                 for i, res in enumerate(results):
                     data = batch_data[i]
@@ -574,12 +573,17 @@ class TransferExperiment:
                     
                     predictions.append(pred)
                     true_labels.append(true_label)
-                    details.append({
+                    detail = {
                         'graph_id': f"{target_name}_{batch_indices[i]}",
                         'true_label': true_label,
                         'prediction': pred,
                         'llm_response': res['response'][:200],
-                    })
+                    }
+                    # 记录概率信息（如果有）
+                    if 'prob_0' in res:
+                        detail['prob_0'] = res['prob_0']
+                        detail['prob_1'] = res['prob_1']
+                    details.append(detail)
 
                 print(f" done.")
 
@@ -595,13 +599,15 @@ class TransferExperiment:
 
         return {
             'source': source_name, 'target': target_name,
+            'infer_method': infer_method,
             'total_target': n_target, 'total_predicted': len(predictions),
             'failed': failed, 'metrics': metrics, 'details': details,
             'llm_calls': self.llm.call_count if self.llm is not None else 0,
         }
 
     def run_transfer_no_rag(self, source_name: str, target_name: str,
-                            sample_size: int = 50, eval_batch_size: int = 4) -> Dict:
+                            sample_size: int = 50, eval_batch_size: int = 4,
+                            infer_method: str = 'llm_logits') -> Dict:
         """消融实验：无 RAG 对照组。"""
         print(f"\n{'='*60}")
         print(f"  [No-RAG] {source_name} -> {target_name}  (sample={sample_size}, batch={eval_batch_size})")
@@ -640,25 +646,10 @@ class TransferExperiment:
                 else:
                     print("[WARNING] No GNN checkpoint found, using random weights.")
 
-        # 使用与 Full-RAG 相同的 test_indices 保证消融对比公平性
-        ckpt_proj = f"checkpoints/proj_{source_name.lower()}_{target_name.lower()}.pt"
-        if Path(ckpt_proj).exists():
-            ckpt_data = torch.load(ckpt_proj, map_location='cpu')
-            test_indices = ckpt_data.get('test_indices', None)
-            if test_indices is not None:
-                target_indices = test_indices
-                n_target = len(target_indices)
-                print(f"[No-RAG] Using same test_indices as Full-RAG: {n_target} graphs")
-            else:
-                rng = np.random.RandomState(42)
-                n_target = min(sample_size, len(tgt_list))
-                target_indices = rng.choice(len(tgt_list), n_target, replace=False)
-                print(f"[No-RAG] No test_indices in checkpoint, random sampling {n_target} graphs")
-        else:
-            rng = np.random.RandomState(42)
-            n_target = min(sample_size, len(tgt_list))
-            target_indices = rng.choice(len(tgt_list), n_target, replace=False)
-            print(f"[No-RAG] No checkpoint found, random sampling {n_target} graphs")
+        # 纯跨域：在目标域全量数据上评估（目标域未参与任何训练）
+        n_target = len(tgt_list)
+        target_indices = list(range(n_target))
+        print(f"[No-RAG] Evaluating on ALL {n_target} target domain graphs (none used in training)")
 
         prop_desc = self.PROP_DESC.get(target_name.lower(), target_name)
         predictions, true_labels, details = [], [], []
@@ -686,7 +677,16 @@ class TransferExperiment:
                     batch_prompts.append(prompt)
 
                 pyg_batch = PyGBatch.from_data_list(batch_data).to(self.device)
-                results = self.llm.predict_batch(pyg_batch, batch_prompts)
+
+                # 根据 infer_method 选择推理方式
+                if infer_method == 'classifier':
+                    results = self.llm.predict_with_classifier(pyg_batch)
+                elif infer_method == 'llm_logits':
+                    results = self.llm.predict_with_llm_logits(pyg_batch, batch_prompts)
+                elif infer_method == 'ensemble':
+                    results = self.llm.predict_batch_ensemble(pyg_batch, batch_prompts)
+                else:  # 'generate'
+                    results = self.llm.predict_batch(pyg_batch, batch_prompts)
 
                 for i, res in enumerate(results):
                     data = batch_data[i]
@@ -695,13 +695,17 @@ class TransferExperiment:
                     
                     predictions.append(pred)
                     true_labels.append(true_label)
-                    details.append({
+                    detail = {
                         'graph_id': f"{target_name}_{batch_indices[i]}",
                         'true_label': true_label,
                         'prediction': pred,
                         'retrieved_count': 0,
                         'llm_response': res['response'][:200],
-                    })
+                    }
+                    if 'prob_0' in res:
+                        detail['prob_0'] = res['prob_0']
+                        detail['prob_1'] = res['prob_1']
+                    details.append(detail)
 
                 print(f" done.")
 
@@ -769,7 +773,8 @@ class TransferExperiment:
 
     def run_ablation_suite(self, sample_size: int = 50,
                            pairs: Optional[List[Tuple]] = None,
-                           eval_batch_size: int = 8) -> Dict:
+                           eval_batch_size: int = 8,
+                           infer_method: str = 'llm_logits') -> Dict:
         """运行消融实验套件：每个迁移对同时运行 Full-RAG 和 No-RAG。"""
         import gc
         if pairs is None:
@@ -779,12 +784,14 @@ class TransferExperiment:
             key = f"{src}->{tgt}"
             ablation[key] = {}
             try:
-                ablation[key]['full_rag'] = self.run_transfer(src, tgt, sample_size, eval_batch_size)
+                ablation[key]['full_rag'] = self.run_transfer(
+                    src, tgt, sample_size, eval_batch_size, infer_method=infer_method)
             except Exception as e:
                 print(f"[ERROR] Full-RAG {key}: {e}")
                 ablation[key]['full_rag'] = {'error': str(e)}
             try:
-                ablation[key]['no_rag'] = self.run_transfer_no_rag(src, tgt, sample_size, eval_batch_size)
+                ablation[key]['no_rag'] = self.run_transfer_no_rag(
+                    src, tgt, sample_size, eval_batch_size, infer_method=infer_method)
             except Exception as e:
                 print(f"[ERROR] No-RAG {key}: {e}")
                 ablation[key]['no_rag'] = {'error': str(e)}
@@ -798,6 +805,56 @@ class TransferExperiment:
                 print(f"[GPU] After {key}: allocated={mem_alloc:.1f}GB, reserved={mem_reserved:.1f}GB")
 
         return ablation
+
+    def run_full_ablation(self, sample_size: int = 50,
+                          pairs: Optional[List[Tuple]] = None,
+                          eval_batch_size: int = 8) -> Dict:
+        """
+        完整消融实验：对每个迁移对，运行 4 种推理方式 × 2 种条件（RAG/NoRAG）。
+        
+        推理方式:
+          - generate:   原始 LLM generate + regex 提取
+          - classifier: 分类头直接预测（修复训练-推理不一致）
+          - llm_logits: LLM next-token logits 分类
+          - ensemble:   分类头 + LLM logits 集成
+        """
+        import gc
+        if pairs is None:
+            pairs = self.TRANSFER_PAIRS
+
+        infer_methods = ['classifier', 'llm_logits', 'ensemble', 'generate']
+        all_results = {}
+
+        for src, tgt in pairs:
+            key = f"{src}->{tgt}"
+            all_results[key] = {}
+
+            for method in infer_methods:
+                # Full-RAG
+                rag_key = f"full_rag_{method}"
+                try:
+                    print(f"\n>>> {key} | {rag_key} <<<")
+                    all_results[key][rag_key] = self.run_transfer(
+                        src, tgt, sample_size, eval_batch_size, infer_method=method)
+                except Exception as e:
+                    print(f"[ERROR] {rag_key} {key}: {e}")
+                    all_results[key][rag_key] = {'error': str(e)}
+
+                # No-RAG
+                norag_key = f"no_rag_{method}"
+                try:
+                    print(f"\n>>> {key} | {norag_key} <<<")
+                    all_results[key][norag_key] = self.run_transfer_no_rag(
+                        src, tgt, sample_size, eval_batch_size, infer_method=method)
+                except Exception as e:
+                    print(f"[ERROR] {norag_key} {key}: {e}")
+                    all_results[key][norag_key] = {'error': str(e)}
+
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        return all_results
 
     def save_results(self, results: Dict, output_dir: str = "real_experiment_results"):
         Path(output_dir).mkdir(exist_ok=True)
@@ -849,43 +906,40 @@ def main():
     print("=" * 60)
     print("  Domain-Aware RAG-MDA — Graph Transfer Learning + Ablation")
     print("  LLM Backend: ModelScope (frozen, soft graph token injection)")
+    print("  Inference: llm_logits | Training: source domain only")
     print("=" * 60)
 
-    # ModelScope 模型与缓存路径可通过环境变量覆盖
-    # MODELSCOPE_MODEL_ID=LLM-Research/Meta-Llama-3.1-8B
-    # MODELSCOPE_CACHE_DIR=<project>/checkpoints/modelscope
     experiment = TransferExperiment(
         data_dir="data",
-        hidden_dim=512,            # 增大 GNN 维度，减少信息瓶颈（原 128，GraphPrompter 用 1024）
-        gnn_epochs=100,            # 增加 GNN 预训练轮数（原 50）
+        hidden_dim=512,
+        gnn_epochs=100,
         gnn_batch_size=128,
         llm_path=MODELSCOPE_MODEL_ID,
         modelscope_cache_dir=MODELSCOPE_CACHE_DIR,
         modelscope_revision=MODELSCOPE_REVISION,
-        num_graph_tokens=8,        # 8 个 soft token，增加图信息容量
-        load_in_8bit=True,         # 8-bit 量化：LLM 显存 ~16GB→~8GB，防止溢出到共享内存
+        num_graph_tokens=32,
+        load_in_8bit=True,
     )
 
-    # LLM 天然冻结，无需检查服务状态
+    pairs = [
+        ('PROTEINS', 'DD'),
+        ('DD', 'PROTEINS'),
+        ('COX2', 'COX2_MD'),
+        ('COX2_MD', 'COX2'),
+        ('BZR', 'BZR_MD'),
+        ('BZR_MD', 'BZR'),
+    ]
 
-    # 运行消融实验
+    # 运行消融实验（Full-RAG vs No-RAG，使用 LLM logits 推理）
     ablation = experiment.run_ablation_suite(
-        sample_size=200,
-        eval_batch_size=2,         # 显存紧张，减至 2 降低 KV cache 占用
-        pairs=[
-            ('PROTEINS', 'DD'),
-            ('DD', 'PROTEINS'),
-            ('COX2', 'COX2_MD'),
-            ('COX2_MD', 'COX2'),
-            ('BZR', 'BZR_MD'),
-            ('BZR_MD', 'BZR'),
-        ],
+        sample_size=9999,       # 全量评估（目标域全部数据）
+        eval_batch_size=2,
+        pairs=pairs,
+        infer_method='llm_logits',
     )
 
     # 保存结果
     experiment.save_results(ablation)
-
-    # 打印对比表
     print_ablation_comparison(ablation)
 
     print("\nExperiment completed.")
