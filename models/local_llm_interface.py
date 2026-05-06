@@ -243,9 +243,15 @@ class LocalLLMInterface:
             num_tokens=num_graph_tokens,
         ).to(self.device)
 
-        # ---- 分类头（辅助 loss，直接从 GNN embedding 做二分类）----
+        # ---- 辅助分类头（直接从 GNN embedding 做二分类）----
         # 解决“生成式 loss 信号穿不透冻结 LLM”的问题
-
+        # 提供不经过 LLM 的直接梯度信号给 GNN
+        self.cls_head = nn.Sequential(
+            nn.Linear(gnn_hidden_dim, gnn_hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(gnn_hidden_dim, 2),
+        ).to(self.device)
 
         print(f"[GNN] node_feat={num_node_features}, hidden={gnn_hidden_dim}, "
               f"layers={gnn_num_layers}, graph_tokens={num_graph_tokens}")
@@ -261,7 +267,8 @@ class LocalLLMInterface:
     # ----------------------------------------------------------
     def trainable_parameters(self):
         return (list(self.gnn.parameters()) 
-                + list(self.projector.parameters()))
+                + list(self.projector.parameters())
+                + list(self.cls_head.parameters()))
 
     # ----------------------------------------------------------
     # 图编码
@@ -306,15 +313,20 @@ class LocalLLMInterface:
         pyg_batch,
         prompts: List[str],
         labels_text: List[str],
+        cls_weight: float = 0.5,
         **kwargs,
     ) -> Tuple[torch.Tensor, float]:
         """
-        纯生成式 loss：训练 GNN + Projector。
+        生成式 loss + 辅助分类 loss：训练 GNN + Projector + cls_head。
         
-        梯度流向：
-          gen_loss → LLM(frozen) → soft_tokens → Projector → graph_emb → GNN
+        双重梯度流向：
+          1. gen_loss → LLM(frozen) → soft_tokens → Projector → graph_emb → GNN
+          2. cls_loss → cls_head → graph_emb → GNN  (直接梯度，不经过 LLM)
         
-        LLM 参数冻结，梯度只更新 GNN 和 Projector。
+        辅助分类头解决"梯度穿不透冻结 LLM"的问题，为 GNN 提供直接的分类梯度信号。
+        
+        Args:
+            cls_weight: 辅助分类 loss 的权重，默认 0.5
         
         Returns:
             (loss, accuracy): loss 用于反向传播，accuracy 用于监控训练效果
@@ -325,18 +337,25 @@ class LocalLLMInterface:
         graph_emb = self._encode_graph(pyg_batch)          # [B, hidden]
         soft_tokens = self._get_soft_tokens(graph_emb)     # [B, num_tok, llm_dim]
 
-        # 2. 用 chat template 包装后 tokenize
+        # 2. 辅助分类 loss（直接从 GNN embedding 分类，不经过 LLM）
+        true_labels = [int(l) for l in labels_text]
+        true_labels_tensor = torch.tensor(true_labels, device=self.device, dtype=torch.long)
+        cls_logits = self.cls_head(graph_emb)              # [B, 2]
+        cls_loss = F.cross_entropy(cls_logits, true_labels_tensor)
+        cls_preds = cls_logits.argmax(dim=-1)
+
+        # 3. 用 chat template 包装后 tokenize
         wrapped = self._wrap_chat_template(prompts)
         text_enc = self.tokenizer(wrapped, add_special_tokens=False)
         label_enc = self.tokenizer(labels_text, add_special_tokens=False)
 
-        # 3. 获取特殊 token 的 embedding
+        # 4. 获取特殊 token 的 embedding
         embed_fn = self.llm.get_input_embeddings()
         bos_embed = embed_fn(torch.tensor([self.tokenizer.bos_token_id], device=self.device))
         pad_embed = embed_fn(torch.tensor([self.tokenizer.pad_token_id], device=self.device))
         soft_tokens = soft_tokens.to(bos_embed.dtype)
 
-        # 4. 逐样本手动拼接 embeddings
+        # 5. 逐样本手动拼接 embeddings
         batch_inputs_embeds = []
         batch_attention_mask = []
         batch_label_ids = []
@@ -354,7 +373,7 @@ class LocalLLMInterface:
             label_for_loss = [-100] * n_ignore + label_ids_i
             batch_label_ids.append(label_for_loss)
 
-        # 5. 左侧 padding 对齐
+        # 6. 左侧 padding 对齐
         max_length = max(x.shape[0] for x in batch_inputs_embeds)
         for i in range(B):
             pad_len = max_length - batch_inputs_embeds[i].shape[0]
@@ -367,7 +386,7 @@ class LocalLLMInterface:
         attention_mask = torch.tensor(batch_attention_mask, device=self.device)
         label_ids = torch.tensor(batch_label_ids, device=self.device)
 
-        # 6. LLM 前向
+        # 7. LLM 前向
         outputs = self.llm(
             inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,
@@ -376,11 +395,9 @@ class LocalLLMInterface:
             use_cache=False,
         )
 
-        # 7. 从 logits 提取 accuracy（零额外计算开销）
-        #    找到每个样本中 label 开始位置前一个位置的 logits，即 LLM 预测 label 的位置
+        # 8. 从 LLM logits 提取 accuracy（零额外计算开销）
         token_0_id = self.tokenizer.encode("0", add_special_tokens=False)[0]
         token_1_id = self.tokenizer.encode("1", add_special_tokens=False)[0]
-        true_labels = [int(l) for l in labels_text]
         correct = 0
         for i in range(B):
             label_positions = (label_ids[i] != -100).nonzero(as_tuple=True)[0]
@@ -392,7 +409,11 @@ class LocalLLMInterface:
                     correct += 1
         accuracy = correct / max(B, 1)
 
-        return outputs.loss, accuracy
+        # 9. 组合 loss：生成式 loss + 辅助分类 loss
+        gen_loss = outputs.loss
+        total_loss = gen_loss + cls_weight * cls_loss
+
+        return total_loss, accuracy
 
     # ----------------------------------------------------------
     # 推理（generate）
@@ -626,6 +647,10 @@ class LocalLLMInterface:
             self.projector.cpu()
             del self.projector
             self.projector = None
+        if hasattr(self, 'cls_head') and self.cls_head is not None:
+            self.cls_head.cpu()
+            del self.cls_head
+            self.cls_head = None
 
         self._label_cache.clear()
         gc.collect()
@@ -647,6 +672,7 @@ class LocalLLMInterface:
         torch.save({
             'gnn': self.gnn.state_dict(),
             'projector': self.projector.state_dict(),
+            'cls_head': self.cls_head.state_dict(),
         }, path)
         print(f"[Checkpoint] Saved -> {path}")
 
@@ -657,5 +683,7 @@ class LocalLLMInterface:
         ckpt = torch.load(path, map_location=self.device)
         self.gnn.load_state_dict(ckpt['gnn'])
         self.projector.load_state_dict(ckpt['projector'])
+        if 'cls_head' in ckpt:
+            self.cls_head.load_state_dict(ckpt['cls_head'])
         print(f"[Checkpoint] Loaded <- {path}")
         return True

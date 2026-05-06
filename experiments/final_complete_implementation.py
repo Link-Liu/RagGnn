@@ -215,10 +215,10 @@ class TransferExperiment:
         target_name: str,
         ckpt_proj: str,
         train_epochs: int = 50,
-        train_batch_size: int = 1,
+        train_batch_size: int = 4,
         lr_gnn: float = 5e-5,
         lr_proj: float = 2e-4,
-        grad_accum_steps: int = 16,
+        grad_accum_steps: int = 4,
         train_ratio: float = 0.8,
     ):
         """
@@ -287,18 +287,21 @@ class TransferExperiment:
             num_workers=0, pin_memory=(self.device == 'cuda')
         )
 
-        # ---- 优化器 ----
+        # ---- 优化器（包含 GNN + Projector + 辅助分类头）----
         optimizer = torch.optim.AdamW([
             {"params": self.llm.gnn.parameters(), "lr": lr_gnn},
             {"params": self.llm.projector.parameters(), "lr": lr_proj},
+            {"params": self.llm.cls_head.parameters(), "lr": lr_proj},
         ], weight_decay=1e-5)
 
-        total_steps = train_epochs * max(len(train_loader), 1)
-        warmup_steps = max(total_steps // 5, 1)
+        # warmup 步数基于优化器实际更新步数（而非 batch 步数）
+        steps_per_epoch = max(len(train_loader) // grad_accum_steps, 1)
+        total_update_steps = train_epochs * steps_per_epoch
+        warmup_steps = max(total_update_steps // 5, 1)
         def lr_lambda(step):
             if step < warmup_steps:
                 return float(step) / float(max(warmup_steps, 1))
-            progress = float(step - warmup_steps) / float(max(total_steps - warmup_steps, 1))
+            progress = float(step - warmup_steps) / float(max(total_update_steps - warmup_steps, 1))
             return max(0.1, 0.5 * (1.0 + np.cos(np.pi * progress)))
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
@@ -312,6 +315,7 @@ class TransferExperiment:
         for epoch in range(1, train_epochs + 1):
             self.llm.gnn.train()
             self.llm.projector.train()
+            self.llm.cls_head.train()
             optimizer.zero_grad()
             epoch_loss, n_steps = 0.0, 0
             train_correct, train_total = 0, 0
@@ -357,6 +361,7 @@ class TransferExperiment:
             # ---- 验证（源域验证集，同样无 RAG） ----
             self.llm.gnn.eval()
             self.llm.projector.eval()
+            self.llm.cls_head.eval()
             val_loss, val_steps = 0.0, 0
             val_correct, val_total = 0, 0
             with torch.no_grad():
@@ -395,6 +400,7 @@ class TransferExperiment:
                 best_state = {
                     "gnn": {k: v.cpu().clone() for k, v in self.llm.gnn.state_dict().items()},
                     "projector": {k: v.cpu().clone() for k, v in self.llm.projector.state_dict().items()},
+                    "cls_head": {k: v.cpu().clone() for k, v in self.llm.cls_head.state_dict().items()},
                 }
                 print(f"  ← best ✓")
             else:
@@ -408,14 +414,18 @@ class TransferExperiment:
         if best_state:
             self.llm.gnn.load_state_dict(best_state["gnn"])
             self.llm.projector.load_state_dict(best_state["projector"])
+            if "cls_head" in best_state:
+                self.llm.cls_head.load_state_dict(best_state["cls_head"])
             self.llm.gnn.to(self.device)
             self.llm.projector.to(self.device)
+            self.llm.cls_head.to(self.device)
             Path(ckpt_proj).parent.mkdir(parents=True, exist_ok=True)
             torch.save(best_state, ckpt_proj)
             print(f"  [Joint Train] Best checkpoint saved -> {ckpt_proj} (val_loss={best_val_loss:.4f})")
 
         self.llm.gnn.eval()
         self.llm.projector.eval()
+        self.llm.cls_head.eval()
 
     def run_transfer(self, source_name: str, target_name: str,
                      sample_size: int = 50, eval_batch_size: int = 4,
