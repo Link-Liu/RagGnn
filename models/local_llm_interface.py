@@ -245,19 +245,14 @@ class LocalLLMInterface:
 
         # ---- 分类头（辅助 loss，直接从 GNN embedding 做二分类）----
         # 解决“生成式 loss 信号穿不透冻结 LLM”的问题
-        self.classifier_head = nn.Sequential(
-            nn.Linear(gnn_hidden_dim, gnn_hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(gnn_hidden_dim, 2),
-        ).to(self.device)
+
 
         print(f"[GNN] node_feat={num_node_features}, hidden={gnn_hidden_dim}, "
               f"layers={gnn_num_layers}, graph_tokens={num_graph_tokens}")
 
         trainable = sum(p.numel() for p in self.trainable_parameters())
         total_llm = sum(p.numel() for p in self.llm.parameters())
-        print(f"[Params] Trainable (GNN+Proj+ClsHead): {trainable:,} | "
+        print(f"[Params] Trainable (GNN+Proj): {trainable:,} | "
               f"Frozen (LLM): {total_llm:,} | "
               f"Ratio: {100*trainable/(total_llm+trainable):.3f}%")
 
@@ -266,8 +261,7 @@ class LocalLLMInterface:
     # ----------------------------------------------------------
     def trainable_parameters(self):
         return (list(self.gnn.parameters()) 
-                + list(self.projector.parameters())
-                + list(self.classifier_head.parameters()))
+                + list(self.projector.parameters()))
 
     # ----------------------------------------------------------
     # 图编码
@@ -312,28 +306,15 @@ class LocalLLMInterface:
         pyg_batch,
         prompts: List[str],
         labels_text: List[str],
-        cls_weight: float = 0.3,
-        gen_weight: float = 0.7,
-        epoch: int = 0,
-        total_epochs: int = 1,
+        **kwargs,
     ) -> torch.Tensor:
         """
-        混合 loss：分类头辅助 loss + 生成式 loss。
-        
-        核心设计：
-          - 生成式 loss 是主信号（训练 Projector，让 LLM 理解 soft token）
-          - 分类头 loss 是辅助信号（帮助 GNN 快速学到好的图表示）
-          - 渐进退火：前期分类头权重较高帮 GNN 热身，后期生成式 loss 主导
+        纯生成式 loss：训练 GNN + Projector。
         
         梯度流向：
-          cls_loss → classifier_head → graph_emb → GNN  (不经过 Projector)
           gen_loss → LLM(frozen) → soft_tokens → Projector → graph_emb → GNN
         
-        Args:
-            cls_weight: 分类头 loss 的基础权重（会被退火调低）
-            gen_weight: 生成式 loss 的基础权重（会被退火调高）
-            epoch:        当前训练轮次（用于退火调度）
-            total_epochs: 总训练轮次
+        LLM 参数冻结，梯度只更新 GNN 和 Projector。
         """
         B = pyg_batch.num_graphs
 
@@ -341,14 +322,8 @@ class LocalLLMInterface:
         graph_emb = self._encode_graph(pyg_batch)          # [B, hidden]
         soft_tokens = self._get_soft_tokens(graph_emb)     # [B, num_tok, llm_dim]
 
-        # ========== 分类头 loss（辅助信号，训练 GNN）==========
-        cls_logits = self.classifier_head(graph_emb)       # [B, 2]
-        cls_labels = torch.tensor(
-            [int(l) for l in labels_text], device=self.device, dtype=torch.long
-        )
-        cls_loss = nn.functional.cross_entropy(cls_logits, cls_labels)
 
-        # ========== 生成式 loss（主信号，训练 Projector + GNN）==========
+
         # 2. 用 chat template 包装后 tokenize
         wrapped = self._wrap_chat_template(prompts)
         text_enc = self.tokenizer(wrapped, add_special_tokens=False)
@@ -399,17 +374,7 @@ class LocalLLMInterface:
             return_dict=True,
             use_cache=False,
         )
-        gen_loss = outputs.loss
-
-        # ========== 渐进退火：分类头权重逐渐降低，生成式 loss 逐渐升高 ==========
-        # 前期：cls 帮助 GNN 快速学到好的图表示
-        # 后期：gen_loss 主导，让 Projector 充分学习 LLM 空间映射
-        progress = epoch / max(total_epochs, 1)
-        effective_cls_w = cls_weight * max(0.1, 1.0 - progress)   # 逐渐降到 cls_weight * 0.1
-        effective_gen_w = gen_weight + cls_weight * min(0.9, progress)  # 逐渐吸收 cls 的权重
-
-        total_loss = effective_cls_w * cls_loss + effective_gen_w * gen_loss
-        return total_loss
+        return outputs.loss
 
     # ----------------------------------------------------------
     # 推理（generate）
@@ -527,38 +492,7 @@ class LocalLLMInterface:
             })
         return batch_results
 
-    # ----------------------------------------------------------
-    # 方案1: 分类头直接推理（训练-推理一致性修复）
-    # ----------------------------------------------------------
-    @torch.no_grad()
-    def predict_with_classifier(self, pyg_batch) -> List[Dict]:
-        """
-        使用 classifier_head 直接预测，不经过 LLM generate。
-        
-        训练时 classifier_head 占 70% 的 loss 权重，
-        因此它应该是最可靠的预测信号。
-        """
-        self.call_count += pyg_batch.num_graphs
-        graph_emb = self._encode_graph(pyg_batch)              # [B, hidden]
-        cls_logits = self.classifier_head(graph_emb)            # [B, 2]
-        cls_probs = F.softmax(cls_logits, dim=-1)               # [B, 2]
-        cls_preds = cls_logits.argmax(dim=-1).cpu().tolist()     # [B]
-        
-        batch_results = []
-        for i in range(pyg_batch.num_graphs):
-            prob_0 = cls_probs[i, 0].item()
-            prob_1 = cls_probs[i, 1].item()
-            pred = cls_preds[i]
-            batch_results.append({
-                'prediction': pred,
-                'confidence': max(prob_0, prob_1),
-                'response': str(pred),
-                'prob_0': prob_0,
-                'prob_1': prob_1,
-                'tokens_used': 0,
-                'method': 'classifier_head',
-            })
-        return batch_results
+
 
     # ----------------------------------------------------------
     # 方案3: LLM logits 分类（替代 generate）
@@ -649,50 +583,7 @@ class LocalLLMInterface:
             })
         return batch_results
 
-    # ----------------------------------------------------------
-    # 方案2: 集成推理（分类头 + LLM logits）
-    # ----------------------------------------------------------
-    @torch.no_grad()
-    def predict_batch_ensemble(
-        self, pyg_batch, prompts: List[str],
-        cls_weight: float = 0.6, llm_weight: float = 0.4,
-    ) -> List[Dict]:
-        """
-        集成推理：融合 classifier_head 和 LLM logits 的概率。
-        
-        Args:
-            cls_weight: 分类头概率的权重
-            llm_weight: LLM logits 概率的权重
-        """
-        self.call_count += len(prompts)
 
-        # 路径 A: 分类头
-        graph_emb = self._encode_graph(pyg_batch)
-        cls_logits = self.classifier_head(graph_emb)       # [B, 2]
-        cls_probs = F.softmax(cls_logits, dim=-1)           # [B, 2]
-
-        # 路径 B: LLM logits
-        llm_logits = self._get_llm_classification_logits(pyg_batch, prompts)  # [B, 2]
-        llm_probs = F.softmax(llm_logits, dim=-1)           # [B, 2]
-
-        # 加权融合
-        final_probs = cls_weight * cls_probs + llm_weight * llm_probs  # [B, 2]
-        preds = final_probs.argmax(dim=-1).cpu().tolist()
-
-        batch_results = []
-        for i in range(len(prompts)):
-            batch_results.append({
-                'prediction': preds[i],
-                'confidence': final_probs[i].max().item(),
-                'response': str(preds[i]),
-                'prob_0': final_probs[i, 0].item(),
-                'prob_1': final_probs[i, 1].item(),
-                'cls_prob_1': cls_probs[i, 1].item(),
-                'llm_prob_1': llm_probs[i, 1].item(),
-                'tokens_used': 0,
-                'method': 'ensemble',
-            })
-        return batch_results
 
     @torch.no_grad()
     def predict(self, pyg_batch, prompt: str) -> Dict:
@@ -717,10 +608,7 @@ class LocalLLMInterface:
             self.projector.cpu()
             del self.projector
             self.projector = None
-        if hasattr(self, 'classifier_head') and self.classifier_head is not None:
-            self.classifier_head.cpu()
-            del self.classifier_head
-            self.classifier_head = None
+
         self._label_cache.clear()
         gc.collect()
         if torch.cuda.is_available():
@@ -741,7 +629,6 @@ class LocalLLMInterface:
         torch.save({
             'gnn': self.gnn.state_dict(),
             'projector': self.projector.state_dict(),
-            'classifier_head': self.classifier_head.state_dict(),
         }, path)
         print(f"[Checkpoint] Saved -> {path}")
 
@@ -752,8 +639,5 @@ class LocalLLMInterface:
         ckpt = torch.load(path, map_location=self.device)
         self.gnn.load_state_dict(ckpt['gnn'])
         self.projector.load_state_dict(ckpt['projector'])
-        # 兼容旧 checkpoint（没有 classifier_head）
-        if 'classifier_head' in ckpt:
-            self.classifier_head.load_state_dict(ckpt['classifier_head'])
         print(f"[Checkpoint] Loaded <- {path}")
         return True
