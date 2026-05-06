@@ -26,7 +26,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple
 from pathlib import Path
 
 from modelscope import snapshot_download, AutoModel, AutoTokenizer
@@ -307,7 +307,7 @@ class LocalLLMInterface:
         prompts: List[str],
         labels_text: List[str],
         **kwargs,
-    ) -> torch.Tensor:
+    ) -> Tuple[torch.Tensor, float]:
         """
         纯生成式 loss：训练 GNN + Projector。
         
@@ -315,14 +315,15 @@ class LocalLLMInterface:
           gen_loss → LLM(frozen) → soft_tokens → Projector → graph_emb → GNN
         
         LLM 参数冻结，梯度只更新 GNN 和 Projector。
+        
+        Returns:
+            (loss, accuracy): loss 用于反向传播，accuracy 用于监控训练效果
         """
         B = pyg_batch.num_graphs
 
         # 1. GNN 编码 → soft tokens
         graph_emb = self._encode_graph(pyg_batch)          # [B, hidden]
         soft_tokens = self._get_soft_tokens(graph_emb)     # [B, num_tok, llm_dim]
-
-
 
         # 2. 用 chat template 包装后 tokenize
         wrapped = self._wrap_chat_template(prompts)
@@ -374,7 +375,24 @@ class LocalLLMInterface:
             return_dict=True,
             use_cache=False,
         )
-        return outputs.loss
+
+        # 7. 从 logits 提取 accuracy（零额外计算开销）
+        #    找到每个样本中 label 开始位置前一个位置的 logits，即 LLM 预测 label 的位置
+        token_0_id = self.tokenizer.encode("0", add_special_tokens=False)[0]
+        token_1_id = self.tokenizer.encode("1", add_special_tokens=False)[0]
+        true_labels = [int(l) for l in labels_text]
+        correct = 0
+        for i in range(B):
+            label_positions = (label_ids[i] != -100).nonzero(as_tuple=True)[0]
+            if len(label_positions) > 0:
+                pred_pos = label_positions[0] - 1  # LLM 在此位置预测下一个 token
+                binary_logit = outputs.logits[i, pred_pos, [token_0_id, token_1_id]]
+                pred = binary_logit.argmax().item()
+                if pred == true_labels[i]:
+                    correct += 1
+        accuracy = correct / max(B, 1)
+
+        return outputs.loss, accuracy
 
     # ----------------------------------------------------------
     # 推理（generate）

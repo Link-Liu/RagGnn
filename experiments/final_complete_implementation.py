@@ -280,9 +280,10 @@ class TransferExperiment:
             batch_size=train_batch_size, sampler=sampler, collate_fn=collate_src,
             num_workers=0, pin_memory=(self.device == 'cuda')
         )
+        val_batch_size = 8  # 验证用更大 batch，稳定 val loss 估计
         val_loader = torch.utils.data.DataLoader(
             SourceDataset(val_indices), 
-            batch_size=train_batch_size, shuffle=False, collate_fn=collate_src,
+            batch_size=val_batch_size, shuffle=False, collate_fn=collate_src,
             num_workers=0, pin_memory=(self.device == 'cuda')
         )
 
@@ -313,6 +314,7 @@ class TransferExperiment:
             self.llm.projector.train()
             optimizer.zero_grad()
             epoch_loss, n_steps = 0.0, 0
+            train_correct, train_total = 0, 0
 
             for batch in train_loader:
                 batch = batch.to(self.device)
@@ -329,15 +331,16 @@ class TransferExperiment:
                 
                 labels_text = [str(int(y.item())) for y in batch.y]
                 with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.bfloat16):
-                    loss = self.llm.compute_loss(
+                    loss, acc = self.llm.compute_loss(
                         batch, prompts, labels_text,
-                        epoch=epoch, total_epochs=train_epochs,
                     )
                     loss = loss / grad_accum_steps
 
                 loss.backward()
                 n_steps += 1
                 epoch_loss += loss.item() * grad_accum_steps
+                train_correct += int(acc * B)
+                train_total += B
                 if n_steps % grad_accum_steps == 0:
                     torch.nn.utils.clip_grad_norm_(self.llm.trainable_parameters(), 1.0)
                     optimizer.step()
@@ -349,11 +352,13 @@ class TransferExperiment:
                 scheduler.step()
                 optimizer.zero_grad()
             avg_train_loss = epoch_loss / max(n_steps, 1)
+            train_acc = train_correct / max(train_total, 1)
 
             # ---- 验证（源域验证集，同样无 RAG） ----
             self.llm.gnn.eval()
             self.llm.projector.eval()
             val_loss, val_steps = 0.0, 0
+            val_correct, val_total = 0, 0
             with torch.no_grad():
                 for batch in val_loader:
                     batch = batch.to(self.device)
@@ -370,15 +375,19 @@ class TransferExperiment:
                     
                     labels_text = [str(int(y.item())) for y in batch.y]
                     with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.bfloat16):
-                        loss = self.llm.compute_loss(
+                        loss, acc = self.llm.compute_loss(
                             batch, prompts, labels_text,
-                            epoch=epoch, total_epochs=train_epochs,
                         )
                         val_loss += loss.item()
                         val_steps += 1
+                        val_correct += int(acc * B)
+                        val_total += B
 
             avg_val_loss = val_loss / max(val_steps, 1)
-            print(f"  Epoch {epoch}/{train_epochs}  train_loss={avg_train_loss:.4f}  val_loss={avg_val_loss:.4f}", end="")
+            val_acc = val_correct / max(val_total, 1)
+            print(f"  Epoch {epoch}/{train_epochs}  "
+                  f"train_loss={avg_train_loss:.4f} train_acc={train_acc:.4f}  "
+                  f"val_loss={avg_val_loss:.4f} val_acc={val_acc:.4f}", end="")
 
             if avg_val_loss < best_val_loss:
                 best_val_loss = avg_val_loss
