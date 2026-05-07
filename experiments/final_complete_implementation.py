@@ -443,7 +443,7 @@ class TransferExperiment:
         ckpt_proj = f"checkpoints/proj_{source_name.lower()}_{target_name.lower()}.pt"
 
         # 2. 延迟初始化 LocalLLMInterface（首次运行才加载 LLM）
-        if self.llm is None or self.llm.gnn.convs[0].nn[0].in_features != unified_dim:
+        if self.llm is None or self.llm.gnn.input_proj[0].in_features != unified_dim:
             # 显式释放旧 LLM 的 GPU 显存，防止 CUDA OOM
             if self.llm is not None:
                 print(f"[LLM] Feature dim changed, releasing old LLM ...")
@@ -592,7 +592,7 @@ class TransferExperiment:
         _, tgt_list, unified_dim, _ = self._load_and_prepare(source_name, target_name)
 
         # No-RAG 也需要 LLM（用于 soft token 推理），若尚未初始化则在此完成
-        if self.llm is None or self.llm.gnn.convs[0].nn[0].in_features != unified_dim:
+        if self.llm is None or self.llm.gnn.input_proj[0].in_features != unified_dim:
             # 显式释放旧 LLM 的 GPU 显存，防止 CUDA OOM
             if self.llm is not None:
                 print(f"[LLM] Feature dim changed, releasing old LLM ...")
@@ -881,13 +881,13 @@ def main():
 
     experiment = TransferExperiment(
         data_dir="data",
-        hidden_dim=512,
+        hidden_dim=128,
         gnn_epochs=100,
         gnn_batch_size=128,
         llm_path=MODELSCOPE_MODEL_ID,
         modelscope_cache_dir=MODELSCOPE_CACHE_DIR,
         modelscope_revision=MODELSCOPE_REVISION,
-        num_graph_tokens=32,
+        num_graph_tokens=4,
         load_in_8bit=True,
     )
 

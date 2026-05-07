@@ -52,12 +52,22 @@ class GINEncoder(nn.Module):
                  num_layers: int = 4, dropout: float = 0.1):
         super().__init__()
         self.hidden_dim = hidden_dim
+
+        # ---- 可学习的输入特征投影（替代零填充直接进入 GINConv）----
+        # 将任意维度的节点特征先映射到 hidden_dim，
+        # 这样即使输入被零填充（如 4→89 维），网络也能学到只关注有意义的维度
+        self.input_proj = nn.Sequential(
+            nn.Linear(num_node_features, hidden_dim),
+            nn.ReLU(),
+            nn.LayerNorm(hidden_dim),
+        )
+
         self.convs = nn.ModuleList()
         self.bns = nn.ModuleList()
         for i in range(num_layers):
-            in_dim = num_node_features if i == 0 else hidden_dim
+            # 所有层都是 hidden_dim → hidden_dim（输入已被投影）
             mlp = nn.Sequential(
-                nn.Linear(in_dim, hidden_dim),
+                nn.Linear(hidden_dim, hidden_dim),
                 nn.ReLU(),
                 nn.Linear(hidden_dim, hidden_dim),
             )
@@ -66,7 +76,8 @@ class GINEncoder(nn.Module):
         self.dropout = dropout
 
     def forward(self, x, edge_index, batch=None):
-        h = x.float()
+        # 先投影特征到 hidden_dim，再做消息传递
+        h = self.input_proj(x.float())
         for conv, bn in zip(self.convs, self.bns):
             h = conv(h, edge_index)
             h = bn(h)
