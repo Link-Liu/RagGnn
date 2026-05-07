@@ -69,20 +69,33 @@ MODELSCOPE_REVISION = os.getenv('MODELSCOPE_REVISION', 'master')
 # ---------------------------------------------------------------------------
 
 def extract_graph_info(data, graph_id: str = "", dataset_name: str = "") -> Dict:
-    """从 PyG Data 对象提取 Prompt 需要的图信息。"""
+    """从 PyG Data 对象提取 Prompt 需要的图信息（增强版：含结构统计量）。"""
     num_nodes = data.num_nodes
     num_edges = data.num_edges
     max_edges = num_nodes * (num_nodes - 1) if num_nodes > 1 else 1
     density = num_edges / max_edges if max_edges > 0 else 0
     avg_degree = (2 * num_edges / num_nodes) if num_nodes > 0 else 0
 
+    # 度分布统计
+    edge_index = data.edge_index
+    if edge_index is not None and edge_index.numel() > 0:
+        from torch_geometric.utils import degree
+        deg = degree(edge_index[0], num_nodes=num_nodes).cpu().numpy()
+        max_degree = int(deg.max()) if len(deg) > 0 else 0
+        degree_std = float(deg.std()) if len(deg) > 0 else 0
+    else:
+        max_degree = 0
+        degree_std = 0.0
+
     info = {
         'graph_id': graph_id,
         'dataset': dataset_name,
         'num_nodes': num_nodes,
         'num_edges': num_edges,
-        'density': density,
+        'density': round(density, 4),
         'avg_degree': round(avg_degree, 2),
+        'max_degree': max_degree,
+        'degree_std': round(degree_std, 2),
     }
 
     if data.x is not None:

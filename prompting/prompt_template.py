@@ -243,11 +243,37 @@ def create_detailed_prompt(target_graph_info: Dict,
             label_sem = source_sem['label_pos'] if label in (1, '1') else source_sem['label_neg']
             parts.append(f"  [{i+1}] similarity={score:.3f} label={label} ({label_sem})")
 
-    # 强调 graph embedding 是主要信号
+    # 注入目标图的结构统计量（LLM 天然理解数字）
+    stats_parts = []
+    if target_graph_info.get('num_nodes'):
+        stats_parts.append(f"nodes={target_graph_info['num_nodes']}")
+    if target_graph_info.get('num_edges'):
+        stats_parts.append(f"edges={target_graph_info['num_edges']}")
+    if target_graph_info.get('density') is not None:
+        stats_parts.append(f"density={target_graph_info['density']}")
+    if target_graph_info.get('avg_degree'):
+        stats_parts.append(f"avg_degree={target_graph_info['avg_degree']}")
+    if target_graph_info.get('max_degree'):
+        stats_parts.append(f"max_degree={target_graph_info['max_degree']}")
+    if target_graph_info.get('degree_std'):
+        stats_parts.append(f"degree_std={target_graph_info['degree_std']}")
+
+    if stats_parts:
+        parts.append(f"\nTarget graph statistics: {', '.join(stats_parts)}")
+
+    # 同时为 RAG 参考图也注入统计量（如果有）
+    if retrieved_examples:
+        for i, ex in enumerate(retrieved_examples[:5]):
+            ex_stats = []
+            for key in ['num_nodes', 'num_edges', 'avg_degree']:
+                if key in ex:
+                    ex_stats.append(f"{key}={ex[key]}")
+            if ex_stats:
+                parts.append(f"  Ref[{i+1}] stats: {', '.join(ex_stats)}")
+
+    # 强调结合 graph embedding 和统计量
     parts.append(
-        "\nUse the graph embedding as the primary signal for classification. "
-        "The reference graphs provide additional context but should not override "
-        "the information from the graph embedding."
+        "\nUse both the graph embedding and the graph statistics for classification. "
         "\nAnswer with a single digit (0 or 1):"
     )
 
@@ -283,9 +309,27 @@ def create_no_rag_prompt(target_graph_info: Dict,
         f"You must respond with exactly one digit: 0 or 1."
     )
 
+    # 注入目标图的结构统计量
+    stats_parts = []
+    if target_graph_info.get('num_nodes'):
+        stats_parts.append(f"nodes={target_graph_info['num_nodes']}")
+    if target_graph_info.get('num_edges'):
+        stats_parts.append(f"edges={target_graph_info['num_edges']}")
+    if target_graph_info.get('density') is not None:
+        stats_parts.append(f"density={target_graph_info['density']}")
+    if target_graph_info.get('avg_degree'):
+        stats_parts.append(f"avg_degree={target_graph_info['avg_degree']}")
+    if target_graph_info.get('max_degree'):
+        stats_parts.append(f"max_degree={target_graph_info['max_degree']}")
+    if target_graph_info.get('degree_std'):
+        stats_parts.append(f"degree_std={target_graph_info['degree_std']}")
+
+    if stats_parts:
+        parts.append(f"\nGraph statistics: {', '.join(stats_parts)}")
+
     # 简短直接的指令
     parts.append(
-        "\nBased on the graph embedding, predict the label."
+        "\nBased on the graph embedding and statistics, predict the label."
         "\nAnswer with a single digit (0 or 1):"
     )
 

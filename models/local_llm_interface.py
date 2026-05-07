@@ -35,7 +35,7 @@ try:
     from modelscope import AutoModelForCausalLM as ModelScopeAutoModelForCausalLM
 except Exception:
     ModelScopeAutoModelForCausalLM = AutoModel
-from torch_geometric.nn import GINConv, global_mean_pool
+from torch_geometric.nn import GINConv, global_mean_pool, global_max_pool
 
 
 # ============================================================
@@ -74,6 +74,11 @@ class GINEncoder(nn.Module):
             self.convs.append(GINConv(mlp))
             self.bns.append(nn.BatchNorm1d(hidden_dim))
         self.dropout = dropout
+        # 多通道池化投影：concat(mean, max) → hidden_dim
+        self.pool_proj = nn.Sequential(
+            nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.ReLU(),
+        )
 
     def forward(self, x, edge_index, batch=None):
         # 先投影特征到 hidden_dim，再做消息传递
@@ -84,10 +89,14 @@ class GINEncoder(nn.Module):
             h = F.relu(h)
             h = F.dropout(h, p=self.dropout, training=self.training)
         if batch is not None:
-            h = global_mean_pool(h, batch)
+            h_mean = global_mean_pool(h, batch)   # [B, hidden_dim]
+            h_max = global_max_pool(h, batch)     # [B, hidden_dim]
         else:
-            h = h.mean(dim=0, keepdim=True)
-        return h  # [B, hidden_dim]
+            h_mean = h.mean(dim=0, keepdim=True)
+            h_max = h.max(dim=0, keepdim=True).values
+        # 多通道池化 → 投影回 hidden_dim（保持下游接口不变）
+        h_cat = torch.cat([h_mean, h_max], dim=-1)  # [B, 2*hidden_dim]
+        return self.pool_proj(h_cat)  # [B, hidden_dim]
 
 
 # ============================================================
@@ -109,7 +118,7 @@ class GraphProjector(nn.Module):
     delta 提供微小但关键的图特定偏移来影响分类结果。
     """
     def __init__(self, gnn_dim: int, llm_dim: int, num_tokens: int = 8,
-                 delta_scale: float = 0.1):
+                 delta_scale: float = 0.5):
         super().__init__()
         self.num_tokens = num_tokens
         self.llm_dim = llm_dim
@@ -275,6 +284,21 @@ class LocalLLMInterface:
             llm_dim=llm_dim,
             num_tokens=num_graph_tokens,
         ).to(self.device)
+
+        embed_fn = self.llm.get_input_embeddings()
+
+        # ---- 用有意义的文本 embedding 初始化 base_tokens ----
+        # 让 base_tokens 从一个 LLM 已知的位置出发，而非随机噪声
+        init_text = "The graph classification result based on structural analysis is"
+        init_ids = self.tokenizer.encode(init_text, add_special_tokens=False)
+        # 截取或重复以匹配 num_graph_tokens
+        while len(init_ids) < num_graph_tokens:
+            init_ids = init_ids + init_ids
+        init_ids = init_ids[:num_graph_tokens]
+        with torch.no_grad():
+            init_embeds = embed_fn(torch.tensor(init_ids, device=self.device))
+            self.projector.base_tokens.data.copy_(init_embeds.float())
+        print(f"[Proj] base_tokens initialized from text: '{init_text}'")
 
         print(f"[GNN] node_feat={num_node_features}, hidden={gnn_hidden_dim}, "
               f"layers={gnn_num_layers}, graph_tokens={num_graph_tokens}")
@@ -442,12 +466,57 @@ class LocalLLMInterface:
                     correct += 1
         accuracy = correct / max(B, 1)
 
-        # 10. 双重 loss：
-        #   gen_loss   — LLM 生成 loss（直接优化 base_tokens + delta_proj）
-        #   align_loss — embedding 对齐 loss（保持 soft tokens 在 LLM 能理解的空间）
+        # 10. base_tokens 居中约束: 防止 base_tokens 偏向某一类别
+        #     如果 batch 中所有样本的 logit 都偏向同一侧，说明 base_tokens 有偏置
+        #     用 batch 平均 logit 差的平方作为惩罚（零额外前向开销）
+        batch_logit_diffs = []
+        for i in range(B):
+            label_positions = (label_ids[i] != -100).nonzero(as_tuple=True)[0]
+            if len(label_positions) > 0:
+                pred_pos = label_positions[0] - 1
+                logit_diff = outputs.logits[i, pred_pos, token_0_id] - outputs.logits[i, pred_pos, token_1_id]
+                batch_logit_diffs.append(logit_diff)
+        if batch_logit_diffs:
+            mean_logit_diff = torch.stack(batch_logit_diffs).mean()
+            base_balance_loss = mean_logit_diff ** 2  # 约束均值 logit 差接近 0
+        else:
+            base_balance_loss = torch.tensor(0.0, device=self.device)
+
+        # 11. delta 对比损失：直接训练 delta 对不同类别产生不同扰动
+        #     同类 delta 靠近，异类 delta 远离 → 不经过 LLM 的直接监督信号
+        delta_only = soft_tokens - self.projector.base_tokens.unsqueeze(0).to(soft_tokens.dtype)
+        delta_pooled = delta_only.mean(dim=1)  # [B, llm_dim]
+        delta_norm = F.normalize(delta_pooled.float(), dim=-1)  # [B, llm_dim]
+
+        true_labels_tensor = torch.tensor(true_labels, device=self.device)
+        # 计算 pairwise similarity matrix
+        sim_matrix = torch.mm(delta_norm, delta_norm.t())  # [B, B]
+        # 创建 label mask: same_class[i,j] = 1 if same label
+        label_eq = (true_labels_tensor.unsqueeze(0) == true_labels_tensor.unsqueeze(1)).float()
+        # 排除对角线
+        mask = 1.0 - torch.eye(B, device=self.device)
+        # 温度缩放
+        temperature = 0.5
+        sim_scaled = sim_matrix / temperature
+        # InfoNCE 形式的对比损失
+        exp_sim = torch.exp(sim_scaled) * mask
+        pos_sum = (exp_sim * label_eq).sum(dim=1)  # 同类相似度之和
+        all_sum = exp_sim.sum(dim=1)  # 所有相似度之和
+        # 避免 log(0)
+        contrastive_loss = -torch.log(pos_sum / (all_sum + 1e-8) + 1e-8).mean()
+        # 如果 batch 中只有一个类别，contrastive_loss 可能是 nan
+        if torch.isnan(contrastive_loss) or torch.isinf(contrastive_loss):
+            contrastive_loss = torch.tensor(0.0, device=self.device)
+
+        # 12. 四重 loss：
         gen_loss = outputs.loss
         align_weight = 0.5
-        total_loss = gen_loss + align_weight * align_loss
+        balance_weight = 0.01
+        contrastive_weight = 0.5
+        total_loss = (gen_loss 
+                      + align_weight * align_loss 
+                      + balance_weight * base_balance_loss 
+                      + contrastive_weight * contrastive_loss)
 
         return total_loss, accuracy
 
@@ -712,7 +781,14 @@ class LocalLLMInterface:
         if not p.exists():
             return False
         ckpt = torch.load(path, map_location=self.device)
-        self.gnn.load_state_dict(ckpt['gnn'])
-        self.projector.load_state_dict(ckpt['projector'])
-        print(f"[Checkpoint] Loaded <- {path}")
-        return True
+        try:
+            self.gnn.load_state_dict(ckpt['gnn'])
+            self.projector.load_state_dict(ckpt['projector'])
+            print(f"[Checkpoint] Loaded <- {path}")
+            return True
+        except RuntimeError as e:
+            # 架构变更导致 state_dict 不匹配，删除旧 checkpoint 重新训练
+            print(f"[Checkpoint] Architecture mismatch, deleting old checkpoint: {path}")
+            print(f"  Detail: {e}")
+            p.unlink()
+            return False

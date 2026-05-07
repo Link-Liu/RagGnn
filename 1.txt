@@ -1,0 +1,565 @@
+(lcy) PS D:\LCY\RagGnn> & C:/Users/DELL/anaconda3/envs/lcy/python.exe d:/LCY/RagGnn/experiments/final_complete_implementation.py
+============================================================
+  Domain-Aware RAG-MDA — Graph Transfer Learning + Ablation
+  LLM Backend: ModelScope (frozen, soft graph token injection)
+  Inference: llm_logits | Training: source domain only
+============================================================
+[Init] device=cuda, llm=LLM-Research/Meta-Llama-3.1-8B-Instruct
+
+============================================================
+  Transfer: PROTEINS -> DD  (sample=9999, batch=2)
+============================================================
+[Feature] Unifying dims: PROTEINS=4, DD=89 -> 89
+[Feature] Padding PROTEINS with 85 zeros
+[LLM] Initializing LocalLLMInterface (node_feat=89) ...
+[LLM] Downloading from ModelScope: LLM-Research/Meta-Llama-3.1-8B-Instruct (cache_dir=D:\LCY\RagGnn\checkpoints\modelscope, revision=master)
+Downloading Model from https://www.modelscope.cn to directory: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B-Instruct
+2026-05-07 17:49:15,318 - modelscope - INFO - Creating symbolic link [D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B-Instruct].
+2026-05-07 17:49:15,319 - modelscope - WARNING - Failed to create symbolic link D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B-Instruct for D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B-Instruct.
+[LLM] Loading tokenizer from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B-Instruct
+[LLM] Loading model from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B-Instruct to cuda
+[LLM] 8-bit quantization enabled via BitsAndBytesConfig
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 291/291 [00:08<00:00, 33.36it/s]
+[LLM] Model actually loaded on: cuda:0
+[LLM] All LLM parameters FROZEN.
+[LLM] Gradient checkpointing ENABLED (saves ~60-70% activation memory).
+[GNN] node_feat=89, hidden=128, layers=4, graph_tokens=16
+[Params] Trainable (GNN+Proj): 17,086,208 | Frozen (LLM): 8,030,261,248 | Ratio: 0.212%
+[GNN-Pretrain] 1113 graphs: train=890, val=223, epochs=100, patience=15
+  Epoch   1/100  train_loss=0.6627 train_acc=0.6112  val_loss=0.6623 val_acc=0.5830  ← best ✓
+  Epoch   4/100  train_loss=0.5536 train_acc=0.7270  val_loss=0.6339 val_acc=0.6682  ← best ✓
+  Epoch   5/100  train_loss=0.5519 train_acc=0.7348  val_loss=0.7641 val_acc=0.5919  (patience 0/15)
+  Epoch   6/100  train_loss=0.5418 train_acc=0.7427  val_loss=0.6146 val_acc=0.7130  ← best ✓
+  Epoch  10/100  train_loss=0.4961 train_acc=0.7629  val_loss=0.7782 val_acc=0.5740  (patience 3/15)
+  Epoch  15/100  train_loss=0.4723 train_acc=0.7775  val_loss=0.7457 val_acc=0.6413  (patience 8/15)
+  Epoch  20/100  train_loss=0.4602 train_acc=0.7719  val_loss=1.1753 val_acc=0.4619  (patience 13/15)
+  [Early Stopping] No improvement for 15 epochs.
+[GNN-Pretrain] Done. best_val_loss=0.6146
+[GNN-Pretrain] Saved -> checkpoints/gnn_proteins.pt
+
+============================================================
+  [Joint Train] GNN + Projector — SOURCE DOMAIN ONLY
+  PROTEINS -> DD
+  Train epochs=50, lr_gnn=5e-05, lr_proj=0.0002
+============================================================
+  Source domain: 1113 graphs total
+  Train: 890, Val: 223
+  Target domain: NOT used for training (pure cross-domain)
+  Prompt: No-RAG (train GNN soft tokens without retrieval shortcuts)
+  Epoch 1/50  train_loss=0.8568 train_acc=0.6461  val_loss=0.8110 val_acc=0.6143  ← best ✓
+  Epoch 2/50  train_loss=0.7839 train_acc=0.6640  val_loss=0.8244 val_acc=0.6323  (patience 1/10)
+  Epoch 3/50  train_loss=0.7820 train_acc=0.6708  val_loss=0.7608 val_acc=0.7309  ← best ✓
+  Epoch 4/50  train_loss=0.7727 train_acc=0.7034  val_loss=0.8129 val_acc=0.6682  (patience 1/10)
+  Epoch 5/50  train_loss=0.7821 train_acc=0.6674  val_loss=0.7919 val_acc=0.7175  (patience 2/10)
+  Epoch 6/50  train_loss=0.7986 train_acc=0.6933  val_loss=0.8099 val_acc=0.6099  (patience 3/10)
+  Epoch 7/50  train_loss=0.9604 train_acc=0.6326  val_loss=0.7861 val_acc=0.7489  (patience 4/10)
+  Epoch 8/50  train_loss=0.7815 train_acc=0.7000  val_loss=0.9411 val_acc=0.4439  (patience 5/10)
+  Epoch 9/50  train_loss=0.7749 train_acc=0.6854  val_loss=0.7664 val_acc=0.7085  (patience 6/10)
+  Epoch 10/50  train_loss=0.7820 train_acc=0.6978  val_loss=0.7476 val_acc=0.7489  ← best ✓
+  Epoch 11/50  train_loss=0.7654 train_acc=0.7079  val_loss=0.7911 val_acc=0.7130  (patience 1/10)
+  Epoch 12/50  train_loss=0.7720 train_acc=0.6989  val_loss=0.7629 val_acc=0.7444  (patience 2/10)
+  Epoch 13/50  train_loss=0.7526 train_acc=0.7169  val_loss=0.7851 val_acc=0.7220  (patience 3/10)
+  Epoch 14/50  train_loss=0.7590 train_acc=0.6955  val_loss=0.7657 val_acc=0.6951  (patience 4/10)
+  Epoch 15/50  train_loss=0.7338 train_acc=0.7191  val_loss=0.7701 val_acc=0.7085  (patience 5/10)
+  Epoch 16/50  train_loss=0.7475 train_acc=0.6955  val_loss=0.9316 val_acc=0.6188  (patience 6/10)
+  Epoch 17/50  train_loss=0.7413 train_acc=0.7079  val_loss=0.8157 val_acc=0.6457  (patience 7/10)
+  Epoch 18/50  train_loss=0.7284 train_acc=0.7146  val_loss=0.7750 val_acc=0.7085  (patience 8/10)
+  Epoch 19/50  train_loss=0.7300 train_acc=0.7112  val_loss=0.8958 val_acc=0.5785  (patience 9/10)
+  Epoch 20/50  train_loss=0.7119 train_acc=0.7348  val_loss=0.7987 val_acc=0.6726  (patience 10/10)
+  [Early Stopping] No improvement for 10 epochs, stopping.
+  [Joint Train] Best checkpoint saved -> checkpoints/proj_proteins_dd.pt (val_loss=0.7476)
+[RAG] Encoding 1113 source graphs ...
+[RAG] Indexed 1113 source graphs
+[Eval] Evaluating on ALL 1178 target domain graphs (none used in training)
+
+[Results] PROTEINS->DD:
+  Accuracy : 0.6222  (733/1178)
+  F1       : 0.4994
+  Precision: 0.5522
+  Recall   : 0.4559
+  AUC      : 0.5977
+  Failed   : 0
+
+============================================================
+  [No-RAG] PROTEINS -> DD  (sample=9999, batch=2)
+============================================================
+[Feature] Unifying dims: PROTEINS=4, DD=89 -> 89
+[Feature] Padding PROTEINS with 85 zeros
+[No-RAG] Evaluating on ALL 1178 target domain graphs (none used in training)
+
+[Results] [No-RAG] PROTEINS->DD:
+  Accuracy : 0.4228  (498/1178)
+  F1       : 0.5761
+  Precision: 0.4136
+  Recall   : 0.9487
+  AUC      : 0.5004
+  Failed   : 0
+[GPU] After PROTEINS->DD: allocated=8.5GB, reserved=8.7GB
+
+============================================================
+  Transfer: DD -> PROTEINS  (sample=9999, batch=2)
+============================================================
+[Feature] Unifying dims: DD=89, PROTEINS=4 -> 89
+[Feature] Padding PROTEINS with 85 zeros
+[GNN-Pretrain] 1178 graphs: train=942, val=236, epochs=100, patience=15
+  Epoch   1/100  train_loss=0.6557 train_acc=0.6380  val_loss=2.8437 val_acc=0.3983  ← best ✓
+  Epoch   2/100  train_loss=0.5869 train_acc=0.7091  val_loss=1.4882 val_acc=0.3941  ← best ✓
+  Epoch   3/100  train_loss=0.5503 train_acc=0.7516  val_loss=0.7222 val_acc=0.5678  ← best ✓
+  Epoch   4/100  train_loss=0.5156 train_acc=0.7527  val_loss=0.6510 val_acc=0.6229  ← best ✓
+  Epoch   5/100  train_loss=0.4912 train_acc=0.7781  val_loss=1.3168 val_acc=0.3983  (patience 0/15)
+  Epoch   6/100  train_loss=0.4832 train_acc=0.7824  val_loss=0.5767 val_acc=0.7203  ← best ✓
+  Epoch  10/100  train_loss=0.3673 train_acc=0.8546  val_loss=0.8225 val_acc=0.6822  (patience 3/15)
+  Epoch  15/100  train_loss=0.2807 train_acc=0.8907  val_loss=0.9204 val_acc=0.6864  (patience 8/15)
+  Epoch  20/100  train_loss=0.1891 train_acc=0.9427  val_loss=0.9722 val_acc=0.6483  (patience 13/15)
+  [Early Stopping] No improvement for 15 epochs.
+[GNN-Pretrain] Done. best_val_loss=0.5767
+[GNN-Pretrain] Saved -> checkpoints/gnn_dd.pt
+
+============================================================
+  [Joint Train] GNN + Projector — SOURCE DOMAIN ONLY
+  DD -> PROTEINS
+  Train epochs=50, lr_gnn=5e-05, lr_proj=0.0002
+============================================================
+  Source domain: 1178 graphs total
+  Train: 942, Val: 236
+  Target domain: NOT used for training (pure cross-domain)
+  Prompt: No-RAG (train GNN soft tokens without retrieval shortcuts)
+  Epoch 1/50  train_loss=0.8045 train_acc=0.6444  val_loss=0.7479 val_acc=0.6907  ← best ✓
+  Epoch 2/50  train_loss=0.7365 train_acc=0.7558  val_loss=0.7289 val_acc=0.7331  ← best ✓
+  Epoch 3/50  train_loss=0.7281 train_acc=0.7357  val_loss=0.7660 val_acc=0.7246  (patience 1/10)
+  Epoch 4/50  train_loss=0.7321 train_acc=0.7272  val_loss=0.7276 val_acc=0.7500  ← best ✓
+  Epoch 5/50  train_loss=0.7090 train_acc=0.7749  val_loss=0.8197 val_acc=0.7288  (patience 1/10)
+  Epoch 6/50  train_loss=0.7469 train_acc=0.7293  val_loss=0.7405 val_acc=0.7161  (patience 2/10)
+  Epoch 7/50  train_loss=0.7010 train_acc=0.7834  val_loss=0.7407 val_acc=0.7288  (patience 3/10)
+  Epoch 8/50  train_loss=0.6909 train_acc=0.7781  val_loss=0.7511 val_acc=0.6992  (patience 4/10)
+  Epoch 9/50  train_loss=0.6899 train_acc=0.7866  val_loss=0.7287 val_acc=0.7373  (patience 5/10)
+  Epoch 10/50  train_loss=0.7011 train_acc=0.7718  val_loss=0.7253 val_acc=0.7331  ← best ✓
+  Epoch 11/50  train_loss=0.6611 train_acc=0.7983  val_loss=0.6982 val_acc=0.7415  ← best ✓
+  Epoch 12/50  train_loss=0.6543 train_acc=0.7898  val_loss=0.7171 val_acc=0.7161  (patience 1/10)
+  Epoch 13/50  train_loss=0.6432 train_acc=0.7824  val_loss=0.7603 val_acc=0.7034  (patience 2/10)
+  Epoch 14/50  train_loss=0.6493 train_acc=0.7813  val_loss=0.7346 val_acc=0.7161  (patience 3/10)
+  Epoch 15/50  train_loss=0.6248 train_acc=0.7845  val_loss=0.7722 val_acc=0.6737  (patience 4/10)
+  Epoch 16/50  train_loss=0.6186 train_acc=0.7930  val_loss=0.7451 val_acc=0.7458  (patience 5/10)
+  Epoch 17/50  train_loss=0.6099 train_acc=0.8079  val_loss=0.7480 val_acc=0.6441  (patience 6/10)
+  Epoch 18/50  train_loss=0.6080 train_acc=0.8047  val_loss=0.6897 val_acc=0.7331  ← best ✓
+  Epoch 19/50  train_loss=0.6037 train_acc=0.7941  val_loss=0.7688 val_acc=0.7288  (patience 1/10)
+  Epoch 20/50  train_loss=0.6069 train_acc=0.8047  val_loss=0.7284 val_acc=0.6864  (patience 2/10)
+  Epoch 21/50  train_loss=0.5770 train_acc=0.8195  val_loss=0.7033 val_acc=0.7542  (patience 3/10)
+  Epoch 22/50  train_loss=0.5856 train_acc=0.8068  val_loss=0.6467 val_acc=0.7288  ← best ✓
+  Epoch 23/50  train_loss=0.5646 train_acc=0.8397  val_loss=0.6588 val_acc=0.7288  (patience 1/10)
+  Epoch 24/50  train_loss=0.5673 train_acc=0.8015  val_loss=0.6876 val_acc=0.7076  (patience 2/10)
+  Epoch 25/50  train_loss=0.5660 train_acc=0.8153  val_loss=0.7005 val_acc=0.7034  (patience 3/10)
+  Epoch 26/50  train_loss=0.5537 train_acc=0.8301  val_loss=0.6780 val_acc=0.7331  (patience 4/10)
+  Epoch 27/50  train_loss=0.5564 train_acc=0.8270  val_loss=0.6986 val_acc=0.7585  (patience 5/10)
+  Epoch 28/50  train_loss=0.5324 train_acc=0.8620  val_loss=0.6879 val_acc=0.7331  (patience 6/10)
+  Epoch 29/50  train_loss=0.5499 train_acc=0.8439  val_loss=0.7065 val_acc=0.7331  (patience 7/10)
+  Epoch 30/50  train_loss=0.5202 train_acc=0.8662  val_loss=0.6920 val_acc=0.7585  (patience 8/10)
+  Epoch 31/50  train_loss=0.5399 train_acc=0.8503  val_loss=0.6514 val_acc=0.7246  (patience 9/10)
+  Epoch 32/50  train_loss=0.5387 train_acc=0.8355  val_loss=0.6782 val_acc=0.7246  (patience 10/10)
+  [Early Stopping] No improvement for 10 epochs, stopping.
+  [Joint Train] Best checkpoint saved -> checkpoints/proj_dd_proteins.pt (val_loss=0.6467)
+[RAG] Encoding 1178 source graphs ...
+[RAG] Indexed 1178 source graphs
+[Eval] Evaluating on ALL 1113 target domain graphs (none used in training)
+
+[Results] DD->PROTEINS:
+  Accuracy : 0.4043  (450/1113)
+  F1       : 0.5758
+  Precision: 0.4043
+  Recall   : 1.0000
+  AUC      : 0.5000
+  Failed   : 0
+
+============================================================
+  [No-RAG] DD -> PROTEINS  (sample=9999, batch=2)
+============================================================
+[Feature] Unifying dims: DD=89, PROTEINS=4 -> 89
+[Feature] Padding PROTEINS with 85 zeros
+[No-RAG] Evaluating on ALL 1113 target domain graphs (none used in training)
+
+[Results] [No-RAG] DD->PROTEINS:
+  Accuracy : 0.4043  (450/1113)
+  F1       : 0.5758
+  Precision: 0.4043
+  Recall   : 1.0000
+  AUC      : 0.5000
+  Failed   : 0
+[GPU] After DD->PROTEINS: allocated=8.5GB, reserved=8.7GB
+
+============================================================
+  Transfer: COX2 -> COX2_MD  (sample=9999, batch=2)
+============================================================
+[Feature] Unifying dims: COX2=38, COX2_MD=7 -> 38
+[Feature] Padding COX2_MD with 31 zeros
+[LLM] Feature dim changed, releasing old LLM ...
+[LLM] GPU memory released.
+[LLM] Initializing LocalLLMInterface (node_feat=38) ...
+[LLM] Downloading from ModelScope: LLM-Research/Meta-Llama-3.1-8B-Instruct (cache_dir=D:\LCY\RagGnn\checkpoints\modelscope, revision=master)
+Downloading Model from https://www.modelscope.cn to directory: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B-Instruct
+2026-05-07 19:08:42,399 - modelscope - INFO - Creating symbolic link [D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B-Instruct].
+2026-05-07 19:08:42,399 - modelscope - WARNING - Failed to create symbolic link D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B-Instruct for D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B-Instruct.
+[LLM] Loading tokenizer from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B-Instruct
+[LLM] Loading model from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B-Instruct to cuda
+[LLM] 8-bit quantization enabled via BitsAndBytesConfig
+Loading weights: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 291/291 [00:09<00:00, 31.64it/s]
+[LLM] Model actually loaded on: cuda:0
+[LLM] All LLM parameters FROZEN.
+[LLM] Gradient checkpointing ENABLED (saves ~60-70% activation memory).
+[GNN] node_feat=38, hidden=128, layers=4, graph_tokens=16
+[Params] Trainable (GNN+Proj): 17,079,680 | Frozen (LLM): 8,030,261,248 | Ratio: 0.212%
+[GNN-Pretrain] 467 graphs: train=373, val=94, epochs=100, patience=15
+  Epoch   1/100  train_loss=0.6809 train_acc=0.5308  val_loss=0.6971 val_acc=0.3617  ← best ✓
+  Epoch   2/100  train_loss=0.6006 train_acc=0.7748  val_loss=0.6626 val_acc=0.7021  ← best ✓
+  Epoch   3/100  train_loss=0.5446 train_acc=0.7989  val_loss=0.6210 val_acc=0.7021  ← best ✓
+  Epoch   4/100  train_loss=0.5026 train_acc=0.7936  val_loss=0.6052 val_acc=0.7021  ← best ✓
+  Epoch   5/100  train_loss=0.4781 train_acc=0.8016  val_loss=0.6172 val_acc=0.7021  (patience 0/15)
+  Epoch   8/100  train_loss=0.4338 train_acc=0.8043  val_loss=0.5812 val_acc=0.7021  ← best ✓
+  Epoch  10/100  train_loss=0.4068 train_acc=0.8338  val_loss=0.5940 val_acc=0.7234  (patience 1/15)
+  Epoch  15/100  train_loss=0.3819 train_acc=0.8418  val_loss=0.6217 val_acc=0.7340  (patience 6/15)
+  Epoch  16/100  train_loss=0.3762 train_acc=0.8552  val_loss=0.5805 val_acc=0.7340  ← best ✓
+  Epoch  17/100  train_loss=0.3564 train_acc=0.8606  val_loss=0.5338 val_acc=0.7553  ← best ✓
+  Epoch  20/100  train_loss=0.3413 train_acc=0.8686  val_loss=0.6246 val_acc=0.7128  (patience 2/15)
+  Epoch  25/100  train_loss=0.3171 train_acc=0.8606  val_loss=0.5491 val_acc=0.7660  (patience 7/15)
+  Epoch  30/100  train_loss=0.2957 train_acc=0.8713  val_loss=0.6212 val_acc=0.6915  (patience 12/15)
+  [Early Stopping] No improvement for 15 epochs.
+[GNN-Pretrain] Done. best_val_loss=0.5338
+[GNN-Pretrain] Saved -> checkpoints/gnn_cox2.pt
+
+============================================================
+  [Joint Train] GNN + Projector — SOURCE DOMAIN ONLY
+  COX2 -> COX2_MD
+  Train epochs=50, lr_gnn=5e-05, lr_proj=0.0002
+============================================================
+  Source domain: 467 graphs total
+  Train: 373, Val: 94
+  Target domain: NOT used for training (pure cross-domain)
+  Prompt: No-RAG (train GNN soft tokens without retrieval shortcuts)
+  Epoch 1/50  train_loss=1.1437 train_acc=0.6247  val_loss=0.8100 val_acc=0.6489  ← best ✓
+  Epoch 2/50  train_loss=0.7752 train_acc=0.7105  val_loss=0.8273 val_acc=0.6383  (patience 1/10)
+  Epoch 3/50  train_loss=0.7705 train_acc=0.7239  val_loss=0.8401 val_acc=0.6277  (patience 2/10)
+  Epoch 4/50  train_loss=0.7520 train_acc=0.7292  val_loss=0.8449 val_acc=0.6064  (patience 3/10)
+  Epoch 5/50  train_loss=0.7502 train_acc=0.7480  val_loss=0.7811 val_acc=0.6915  ← best ✓
+  Epoch 6/50  train_loss=0.7203 train_acc=0.7614  val_loss=0.7698 val_acc=0.7340  ← best ✓
+  Epoch 7/50  train_loss=0.7881 train_acc=0.7185  val_loss=0.8053 val_acc=0.7340  (patience 1/10)
+  Epoch 8/50  train_loss=0.7665 train_acc=0.7346  val_loss=0.8376 val_acc=0.7340  (patience 2/10)
+  Epoch 9/50  train_loss=0.7856 train_acc=0.7131  val_loss=0.8183 val_acc=0.6596  (patience 3/10)
+  Epoch 10/50  train_loss=0.7306 train_acc=0.7828  val_loss=0.8567 val_acc=0.7340  (patience 4/10)
+  Epoch 11/50  train_loss=0.7575 train_acc=0.7319  val_loss=0.8036 val_acc=0.6489  (patience 5/10)
+  Epoch 12/50  train_loss=0.7839 train_acc=0.7105  val_loss=0.7769 val_acc=0.7340  (patience 6/10)
+  Epoch 13/50  train_loss=0.7616 train_acc=0.7265  val_loss=0.7872 val_acc=0.6489  (patience 7/10)
+  Epoch 14/50  train_loss=0.7239 train_acc=0.7721  val_loss=0.8302 val_acc=0.6170  (patience 8/10)
+  Epoch 15/50  train_loss=0.7412 train_acc=0.7212  val_loss=0.7809 val_acc=0.7553  (patience 9/10)
+  Epoch 16/50  train_loss=0.7063 train_acc=0.7882  val_loss=0.8972 val_acc=0.7021  (patience 10/10)
+  [Early Stopping] No improvement for 10 epochs, stopping.
+  [Joint Train] Best checkpoint saved -> checkpoints/proj_cox2_cox2_md.pt (val_loss=0.7698)
+[RAG] Encoding 467 source graphs ...
+[RAG] Indexed 467 source graphs
+[Eval] Evaluating on ALL 303 target domain graphs (none used in training)
+
+[Results] COX2->COX2_MD:
+  Accuracy : 0.5116  (155/303)
+  F1       : 0.0000
+  Precision: 0.0000
+  Recall   : 0.0000
+  AUC      : 0.5000
+  Failed   : 0
+
+============================================================
+  [No-RAG] COX2 -> COX2_MD  (sample=9999, batch=2)
+============================================================
+[Feature] Unifying dims: COX2=38, COX2_MD=7 -> 38
+[Feature] Padding COX2_MD with 31 zeros
+[No-RAG] Evaluating on ALL 303 target domain graphs (none used in training)
+
+[Results] [No-RAG] COX2->COX2_MD:
+  Accuracy : 0.5116  (155/303)
+  F1       : 0.0000
+  Precision: 0.0000
+  Recall   : 0.0000
+  AUC      : 0.5000
+  Failed   : 0
+[GPU] After COX2->COX2_MD: allocated=8.5GB, reserved=8.8GB
+
+============================================================
+  Transfer: COX2_MD -> COX2  (sample=9999, batch=2)
+============================================================
+[Feature] Unifying dims: COX2_MD=7, COX2=38 -> 38
+[Feature] Padding COX2_MD with 31 zeros
+[GNN-Pretrain] 303 graphs: train=242, val=61, epochs=100, patience=15
+  Epoch   1/100  train_loss=0.7059 train_acc=0.5331  val_loss=16.2599 val_acc=0.5738  ← best ✓
+  Epoch   2/100  train_loss=0.6507 train_acc=0.6694  val_loss=7.9371 val_acc=0.5738  ← best ✓
+  Epoch   3/100  train_loss=0.6079 train_acc=0.6653  val_loss=3.4150 val_acc=0.5738  ← best ✓
+  Epoch   4/100  train_loss=0.5671 train_acc=0.6983  val_loss=1.0530 val_acc=0.5902  ← best ✓
+  Epoch   5/100  train_loss=0.5215 train_acc=0.7231  val_loss=0.8175 val_acc=0.5902  ← best ✓
+  Epoch   6/100  train_loss=0.4930 train_acc=0.7727  val_loss=0.7812 val_acc=0.6066  ← best ✓
+  Epoch   7/100  train_loss=0.4628 train_acc=0.7851  val_loss=0.7384 val_acc=0.5574  ← best ✓
+  Epoch   8/100  train_loss=0.4064 train_acc=0.8182  val_loss=0.7136 val_acc=0.6066  ← best ✓
+  Epoch   9/100  train_loss=0.3827 train_acc=0.8347  val_loss=0.7045 val_acc=0.5738  ← best ✓
+  Epoch  10/100  train_loss=0.3787 train_acc=0.8264  val_loss=0.6585 val_acc=0.6066  ← best ✓
+  Epoch  15/100  train_loss=0.2741 train_acc=0.8967  val_loss=0.8726 val_acc=0.5082  (patience 4/15)
+  Epoch  20/100  train_loss=0.2324 train_acc=0.8967  val_loss=1.6630 val_acc=0.4754  (patience 9/15)
+  Epoch  25/100  train_loss=0.2098 train_acc=0.9050  val_loss=1.1599 val_acc=0.4754  (patience 14/15)
+  [Early Stopping] No improvement for 15 epochs.
+[GNN-Pretrain] Done. best_val_loss=0.6585
+[GNN-Pretrain] Saved -> checkpoints/gnn_cox2_md.pt
+
+============================================================
+  [Joint Train] GNN + Projector — SOURCE DOMAIN ONLY
+  COX2_MD -> COX2
+  Train epochs=50, lr_gnn=5e-05, lr_proj=0.0002
+============================================================
+  Source domain: 303 graphs total
+  Train: 242, Val: 61
+  Target domain: NOT used for training (pure cross-domain)
+  Prompt: No-RAG (train GNN soft tokens without retrieval shortcuts)
+  Epoch 1/50  train_loss=0.9387 train_acc=0.5207  val_loss=0.9679 val_acc=0.4590  ← best ✓
+  Epoch 2/50  train_loss=0.8415 train_acc=0.5826  val_loss=1.0101 val_acc=0.4590  (patience 1/10)
+  Epoch 3/50  train_loss=0.8198 train_acc=0.5909  val_loss=0.9459 val_acc=0.4590  ← best ✓
+  Epoch 4/50  train_loss=0.8028 train_acc=0.6281  val_loss=0.9089 val_acc=0.4590  ← best ✓
+  Epoch 5/50  train_loss=0.8342 train_acc=0.5661  val_loss=0.8493 val_acc=0.5574  ← best ✓
+  Epoch 6/50  train_loss=0.8405 train_acc=0.5826  val_loss=0.9095 val_acc=0.5082  (patience 1/10)
+  Epoch 7/50  train_loss=0.8421 train_acc=0.5579  val_loss=0.8997 val_acc=0.5574  (patience 2/10)
+  Epoch 8/50  train_loss=0.8426 train_acc=0.5537  val_loss=0.8513 val_acc=0.5574  (patience 3/10)
+  Epoch 9/50  train_loss=0.8208 train_acc=0.6405  val_loss=0.8921 val_acc=0.5738  (patience 4/10)
+  Epoch 10/50  train_loss=0.8125 train_acc=0.6281  val_loss=0.8783 val_acc=0.5410  (patience 5/10)
+  Epoch 11/50  train_loss=0.8165 train_acc=0.5785  val_loss=0.9158 val_acc=0.5902  (patience 6/10)
+  Epoch 12/50  train_loss=0.7999 train_acc=0.6281  val_loss=0.8766 val_acc=0.6230  (patience 7/10)
+  Epoch 13/50  train_loss=0.8056 train_acc=0.5909  val_loss=0.9369 val_acc=0.5410  (patience 8/10)
+  Epoch 14/50  train_loss=0.8335 train_acc=0.5826  val_loss=0.8747 val_acc=0.6230  (patience 9/10)
+  Epoch 15/50  train_loss=0.8146 train_acc=0.5702  val_loss=0.8548 val_acc=0.5574  (patience 10/10)
+  [Early Stopping] No improvement for 10 epochs, stopping.
+  [Joint Train] Best checkpoint saved -> checkpoints/proj_cox2_md_cox2.pt (val_loss=0.8493)
+[RAG] Encoding 303 source graphs ...
+[RAG] Indexed 303 source graphs
+[Eval] Evaluating on ALL 467 target domain graphs (none used in training)
+
+[Results] COX2_MD->COX2:
+  Accuracy : 0.3469  (162/467)
+  F1       : 0.3524
+  Precision: 0.2249
+  Recall   : 0.8137
+  AUC      : 0.5151
+  Failed   : 0
+
+============================================================
+  [No-RAG] COX2_MD -> COX2  (sample=9999, batch=2)
+============================================================
+[Feature] Unifying dims: COX2_MD=7, COX2=38 -> 38
+[Feature] Padding COX2_MD with 31 zeros
+[No-RAG] Evaluating on ALL 467 target domain graphs (none used in training)
+
+[Results] [No-RAG] COX2_MD->COX2:
+  Accuracy : 0.7131  (333/467)
+  F1       : 0.1410
+  Precision: 0.2037
+  Recall   : 0.1078
+  AUC      : 0.4950
+  Failed   : 0
+[GPU] After COX2_MD->COX2: allocated=8.5GB, reserved=8.8GB
+
+============================================================
+  Transfer: BZR -> BZR_MD  (sample=9999, batch=2)
+============================================================
+[Feature] Unifying dims: BZR=56, BZR_MD=8 -> 56
+[Feature] Padding BZR_MD with 48 zeros
+[LLM] Feature dim changed, releasing old LLM ...
+[LLM] GPU memory released.
+[LLM] Initializing LocalLLMInterface (node_feat=56) ...
+[LLM] Downloading from ModelScope: LLM-Research/Meta-Llama-3.1-8B-Instruct (cache_dir=D:\LCY\RagGnn\checkpoints\modelscope, revision=master)
+Downloading Model from https://www.modelscope.cn to directory: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B-Instruct
+2026-05-07 19:25:41,189 - modelscope - INFO - Creating symbolic link [D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B-Instruct].
+2026-05-07 19:25:41,190 - modelscope - WARNING - Failed to create symbolic link D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3.1-8B-Instruct for D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B-Instruct.
+[LLM] Loading tokenizer from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B-Instruct
+[LLM] Loading model from: D:\LCY\RagGnn\checkpoints\modelscope\LLM-Research\Meta-Llama-3___1-8B-Instruct to cuda
+[LLM] 8-bit quantization enabled via BitsAndBytesConfig
+Loading weights: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 291/291 [00:09<00:00, 32.05it/s]
+[LLM] Model actually loaded on: cuda:0
+[LLM] All LLM parameters FROZEN.
+[LLM] Gradient checkpointing ENABLED (saves ~60-70% activation memory).
+[GNN] node_feat=56, hidden=128, layers=4, graph_tokens=16
+[Params] Trainable (GNN+Proj): 17,081,984 | Frozen (LLM): 8,030,261,248 | Ratio: 0.212%
+[GNN-Pretrain] 405 graphs: train=324, val=81, epochs=100, patience=15
+  Epoch   1/100  train_loss=0.7369 train_acc=0.3858  val_loss=0.6753 val_acc=0.8272  ← best ✓
+  Epoch   2/100  train_loss=0.6198 train_acc=0.6944  val_loss=0.6549 val_acc=0.8395  ← best ✓
+  Epoch   3/100  train_loss=0.5357 train_acc=0.8179  val_loss=0.6153 val_acc=0.8148  ← best ✓
+  Epoch   4/100  train_loss=0.4880 train_acc=0.8580  val_loss=0.5631 val_acc=0.8395  ← best ✓
+  Epoch   5/100  train_loss=0.4365 train_acc=0.8364  val_loss=0.5023 val_acc=0.8642  ← best ✓
+  Epoch   6/100  train_loss=0.3967 train_acc=0.8796  val_loss=0.4509 val_acc=0.8272  ← best ✓
+  Epoch   7/100  train_loss=0.3787 train_acc=0.8735  val_loss=0.4072 val_acc=0.8642  ← best ✓
+  Epoch   8/100  train_loss=0.3514 train_acc=0.8827  val_loss=0.3919 val_acc=0.8889  ← best ✓
+  Epoch   9/100  train_loss=0.3273 train_acc=0.9012  val_loss=0.3658 val_acc=0.8765  ← best ✓
+  Epoch  10/100  train_loss=0.3181 train_acc=0.8951  val_loss=0.3334 val_acc=0.8889  ← best ✓
+  Epoch  14/100  train_loss=0.2607 train_acc=0.9290  val_loss=0.3169 val_acc=0.8889  ← best ✓
+  Epoch  15/100  train_loss=0.2635 train_acc=0.9012  val_loss=0.3354 val_acc=0.8889  (patience 0/15)
+  Epoch  18/100  train_loss=0.2430 train_acc=0.9259  val_loss=0.3074 val_acc=0.8642  ← best ✓
+  Epoch  19/100  train_loss=0.2194 train_acc=0.9290  val_loss=0.2735 val_acc=0.9012  ← best ✓
+  Epoch  20/100  train_loss=0.2208 train_acc=0.9259  val_loss=0.2976 val_acc=0.8889  (patience 0/15)
+  Epoch  25/100  train_loss=0.1842 train_acc=0.9444  val_loss=0.3672 val_acc=0.8889  (patience 5/15)
+  Epoch  30/100  train_loss=0.1611 train_acc=0.9444  val_loss=0.4047 val_acc=0.8272  (patience 10/15)
+  Epoch  33/100  train_loss=0.1577 train_acc=0.9537  val_loss=0.2396 val_acc=0.9136  ← best ✓
+  Epoch  35/100  train_loss=0.1715 train_acc=0.9506  val_loss=0.3878 val_acc=0.8642  (patience 1/15)
+  Epoch  40/100  train_loss=0.1429 train_acc=0.9568  val_loss=0.3108 val_acc=0.9012  (patience 6/15)
+  Epoch  45/100  train_loss=0.1371 train_acc=0.9475  val_loss=0.4151 val_acc=0.8765  (patience 11/15)
+  [Early Stopping] No improvement for 15 epochs.
+[GNN-Pretrain] Done. best_val_loss=0.2396
+[GNN-Pretrain] Saved -> checkpoints/gnn_bzr.pt
+
+============================================================
+  [Joint Train] GNN + Projector — SOURCE DOMAIN ONLY
+  BZR -> BZR_MD
+  Train epochs=50, lr_gnn=5e-05, lr_proj=0.0002
+============================================================
+  Source domain: 405 graphs total
+  Train: 324, Val: 81
+  Target domain: NOT used for training (pure cross-domain)
+  Prompt: No-RAG (train GNN soft tokens without retrieval shortcuts)
+  Epoch 1/50  train_loss=0.8371 train_acc=0.6914  val_loss=0.6229 val_acc=0.9136  ← best ✓
+  Epoch 2/50  train_loss=0.7701 train_acc=0.7963  val_loss=0.6696 val_acc=0.8642  (patience 1/10)
+  Epoch 3/50  train_loss=0.6983 train_acc=0.8179  val_loss=0.6218 val_acc=0.9136  ← best ✓
+  Epoch 4/50  train_loss=0.6967 train_acc=0.8302  val_loss=0.6137 val_acc=0.9012  ← best ✓
+  Epoch 5/50  train_loss=0.6756 train_acc=0.8519  val_loss=0.6581 val_acc=0.9012  (patience 1/10)
+  Epoch 6/50  train_loss=0.7067 train_acc=0.7932  val_loss=0.6923 val_acc=0.8765  (patience 2/10)
+  Epoch 7/50  train_loss=0.7124 train_acc=0.8086  val_loss=0.6795 val_acc=0.9012  (patience 3/10)
+  Epoch 8/50  train_loss=0.6765 train_acc=0.8333  val_loss=0.6551 val_acc=0.9136  (patience 4/10)
+  Epoch 9/50  train_loss=0.7473 train_acc=0.8611  val_loss=0.7213 val_acc=0.9012  (patience 5/10)
+  Epoch 10/50  train_loss=0.6691 train_acc=0.8642  val_loss=0.7174 val_acc=0.8642  (patience 6/10)
+  Epoch 11/50  train_loss=0.7220 train_acc=0.8117  val_loss=0.8074 val_acc=0.4938  (patience 7/10)
+  Epoch 12/50  train_loss=0.6478 train_acc=0.8488  val_loss=0.6876 val_acc=0.8889  (patience 8/10)
+  Epoch 13/50  train_loss=0.6805 train_acc=0.8395  val_loss=0.7033 val_acc=0.9012  (patience 9/10)
+  Epoch 14/50  train_loss=0.7118 train_acc=0.8025  val_loss=0.6739 val_acc=0.8642  (patience 10/10)
+  [Early Stopping] No improvement for 10 epochs, stopping.
+  [Joint Train] Best checkpoint saved -> checkpoints/proj_bzr_bzr_md.pt (val_loss=0.6137)
+[RAG] Encoding 405 source graphs ...
+[RAG] Indexed 405 source graphs
+[Eval] Evaluating on ALL 306 target domain graphs (none used in training)
+
+[Results] BZR->BZR_MD:
+  Accuracy : 0.4837  (148/306)
+  F1       : 0.5885
+  Precision: 0.4978
+  Recall   : 0.7197
+  AUC      : 0.4773
+  Failed   : 0
+
+============================================================
+  [No-RAG] BZR -> BZR_MD  (sample=9999, batch=2)
+============================================================
+[Feature] Unifying dims: BZR=56, BZR_MD=8 -> 56
+[Feature] Padding BZR_MD with 48 zeros
+[No-RAG] Evaluating on ALL 306 target domain graphs (none used in training)
+
+[Results] [No-RAG] BZR->BZR_MD:
+  Accuracy : 0.4869  (149/306)
+  F1       : 0.0000
+  Precision: 0.0000
+  Recall   : 0.0000
+  AUC      : 0.5000
+  Failed   : 0
+[GPU] After BZR->BZR_MD: allocated=8.5GB, reserved=8.8GB
+
+============================================================
+  Transfer: BZR_MD -> BZR  (sample=9999, batch=2)
+============================================================
+[Feature] Unifying dims: BZR_MD=8, BZR=56 -> 56
+[Feature] Padding BZR_MD with 48 zeros
+[GNN-Pretrain] 306 graphs: train=244, val=62, epochs=100, patience=15
+  Epoch   1/100  train_loss=0.6941 train_acc=0.5328  val_loss=4.8051 val_acc=0.4516  ← best ✓
+  Epoch   2/100  train_loss=0.6198 train_acc=0.6721  val_loss=2.4707 val_acc=0.5645  ← best ✓
+  Epoch   3/100  train_loss=0.5546 train_acc=0.7459  val_loss=2.0871 val_acc=0.5645  ← best ✓
+  Epoch   4/100  train_loss=0.5372 train_acc=0.7459  val_loss=0.6895 val_acc=0.6452  ← best ✓
+  Epoch   5/100  train_loss=0.4953 train_acc=0.7582  val_loss=1.1443 val_acc=0.4839  (patience 0/15)
+  Epoch  10/100  train_loss=0.4042 train_acc=0.8320  val_loss=1.0411 val_acc=0.6129  (patience 5/15)
+  Epoch  15/100  train_loss=0.3503 train_acc=0.8238  val_loss=0.9000 val_acc=0.6129  (patience 10/15)
+  [Early Stopping] No improvement for 15 epochs.
+[GNN-Pretrain] Done. best_val_loss=0.6895
+[GNN-Pretrain] Saved -> checkpoints/gnn_bzr_md.pt
+
+============================================================
+  [Joint Train] GNN + Projector — SOURCE DOMAIN ONLY
+  BZR_MD -> BZR
+  Train epochs=50, lr_gnn=5e-05, lr_proj=0.0002
+============================================================
+  Source domain: 306 graphs total
+  Train: 244, Val: 62
+  Target domain: NOT used for training (pure cross-domain)
+  Prompt: No-RAG (train GNN soft tokens without retrieval shortcuts)
+  Epoch 1/50  train_loss=0.9653 train_acc=0.5164  val_loss=0.9243 val_acc=0.5323  ← best ✓
+  Epoch 2/50  train_loss=0.8184 train_acc=0.6270  val_loss=0.8956 val_acc=0.6935  ← best ✓
+  Epoch 3/50  train_loss=0.8093 train_acc=0.6516  val_loss=0.8290 val_acc=0.6452  ← best ✓
+  Epoch 4/50  train_loss=0.8079 train_acc=0.6598  val_loss=0.7983 val_acc=0.6774  ← best ✓
+  Epoch 5/50  train_loss=0.7865 train_acc=0.6885  val_loss=0.8560 val_acc=0.6774  (patience 1/10)
+  Epoch 6/50  train_loss=0.8032 train_acc=0.6270  val_loss=0.8478 val_acc=0.6452  (patience 2/10)
+  Epoch 7/50  train_loss=0.7621 train_acc=0.6803  val_loss=0.8668 val_acc=0.6452  (patience 3/10)
+  Epoch 8/50  train_loss=0.8282 train_acc=0.6680  val_loss=0.8246 val_acc=0.6935  (patience 4/10)
+  Epoch 9/50  train_loss=1.1135 train_acc=0.6926  val_loss=2.5991 val_acc=0.5484  (patience 5/10)
+  Epoch 10/50  train_loss=2.1843 train_acc=0.6148  val_loss=0.8873 val_acc=0.5323  (patience 6/10)
+  Epoch 11/50  train_loss=0.8260 train_acc=0.5984  val_loss=0.8431 val_acc=0.6129  (patience 7/10)
+  Epoch 12/50  train_loss=0.8526 train_acc=0.6844  val_loss=0.9121 val_acc=0.6290  (patience 8/10)
+  Epoch 13/50  train_loss=0.7813 train_acc=0.6680  val_loss=0.8091 val_acc=0.7097  (patience 9/10)
+  Epoch 14/50  train_loss=0.7774 train_acc=0.6926  val_loss=0.8317 val_acc=0.6290  (patience 10/10)
+  [Early Stopping] No improvement for 10 epochs, stopping.
+  [Joint Train] Best checkpoint saved -> checkpoints/proj_bzr_md_bzr.pt (val_loss=0.7983)
+[RAG] Encoding 306 source graphs ...
+[RAG] Indexed 306 source graphs
+[Eval] Evaluating on ALL 405 target domain graphs (none used in training)
+
+[Results] BZR_MD->BZR:
+  Accuracy : 0.7877  (319/405)
+  F1       : 0.0000
+  Precision: 0.0000
+  Recall   : 0.0000
+  AUC      : 0.5000
+  Failed   : 0
+
+============================================================
+  [No-RAG] BZR_MD -> BZR  (sample=9999, batch=2)
+============================================================
+[Feature] Unifying dims: BZR_MD=8, BZR=56 -> 56
+[Feature] Padding BZR_MD with 48 zeros
+[No-RAG] Evaluating on ALL 405 target domain graphs (none used in training)
+
+[Results] [No-RAG] BZR_MD->BZR:
+  Accuracy : 0.3679  (149/405)
+  F1       : 0.3368
+  Precision: 0.2167
+  Recall   : 0.7558
+  AUC      : 0.5096
+  Failed   : 0
+[GPU] After BZR_MD->BZR: allocated=8.5GB, reserved=8.8GB
+
+[Save] Results saved to real_experiment_results/
+
+===========================================================================
+  ABLATION STUDY: Full-RAG  vs  No-RAG
+===========================================================================
+Transfer             Cond            Acc     F1    AUC  #Pred
+---------------------------------------------------------------------------
+PROTEINS->DD         Full-RAG     0.6222 0.4994 0.5977   1178
+PROTEINS->DD         No-RAG       0.4228 0.5761 0.5004   1178
+                     Δ(RAG)       +0.1995 -0.0766
+---------------------------------------------------------------------------
+DD->PROTEINS         Full-RAG     0.4043 0.5758 0.5000   1113
+DD->PROTEINS         No-RAG       0.4043 0.5758 0.5000   1113
+                     Δ(RAG)       +0.0000 +0.0000
+---------------------------------------------------------------------------
+COX2->COX2_MD        Full-RAG     0.5116 0.0000 0.5000    303
+COX2->COX2_MD        No-RAG       0.5116 0.0000 0.5000    303
+                     Δ(RAG)       +0.0000 +0.0000
+---------------------------------------------------------------------------
+COX2_MD->COX2        Full-RAG     0.3469 0.3524 0.5151    467
+COX2_MD->COX2        No-RAG       0.7131 0.1410 0.4950    467
+                     Δ(RAG)       -0.3662 +0.2114
+---------------------------------------------------------------------------
+BZR->BZR_MD          Full-RAG     0.4837 0.5885 0.4773    306
+BZR->BZR_MD          No-RAG       0.4869 0.0000 0.5000    306
+                     Δ(RAG)       -0.0033 +0.5885
+---------------------------------------------------------------------------
+BZR_MD->BZR          Full-RAG     0.7877 0.0000 0.5000    405
+BZR_MD->BZR          No-RAG       0.3679 0.3368 0.5096    405
+                     Δ(RAG)       +0.4198 -0.3368
+---------------------------------------------------------------------------
+===========================================================================
+
+Experiment completed.
+(lcy) PS D:\LCY\RagGnn> 
