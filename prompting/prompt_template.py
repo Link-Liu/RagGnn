@@ -234,7 +234,7 @@ def create_detailed_prompt(target_graph_info: Dict,
         f"You must respond with exactly one digit: 0 or 1."
     )
 
-    # RAG 参考图（相似度 + 标签 + 投票统计 + 置信度）
+    # RAG 参考图（只提供相似度和标签，不给投票结论）
     if retrieved_examples:
         parts.append(f"\nReference graphs from {source_sem['task']}:")
         for i, ex in enumerate(retrieved_examples[:5]):
@@ -243,46 +243,11 @@ def create_detailed_prompt(target_graph_info: Dict,
             label_sem = source_sem['label_pos'] if label in (1, '1') else source_sem['label_neg']
             parts.append(f"  [{i+1}] similarity={score:.3f} label={label} ({label_sem})")
 
-        # 投票统计：让 LLM 理解检索结果的整体倾向
-        pos_examples = [ex for ex in retrieved_examples[:5]
-                        if ex.get('label') in (1, '1', True)]
-        neg_examples = [ex for ex in retrieved_examples[:5]
-                        if ex.get('label') in (0, '0', False)]
-        pos_count = len(pos_examples)
-        neg_count = len(neg_examples)
-
-        avg_sim_pos = (sum(ex.get('retrieval_score', 0) for ex in pos_examples)
-                       / pos_count if pos_count > 0 else 0)
-        avg_sim_neg = (sum(ex.get('retrieval_score', 0) for ex in neg_examples)
-                       / neg_count if neg_count > 0 else 0)
-
-        parts.append(f"\nRetrieval summary:")
-        parts.append(f"  Positive references: {pos_count} (avg similarity: {avg_sim_pos:.3f})")
-        parts.append(f"  Negative references: {neg_count} (avg similarity: {avg_sim_neg:.3f})")
-
-        if pos_count > neg_count:
-            parts.append(f"  Majority vote: POSITIVE (label=1)")
-        elif neg_count > pos_count:
-            parts.append(f"  Majority vote: NEGATIVE (label=0)")
-        else:
-            # 平票时看平均相似度
-            if avg_sim_pos > avg_sim_neg:
-                parts.append(f"  Tie-breaking by similarity: leaning POSITIVE (label=1)")
-            else:
-                parts.append(f"  Tie-breaking by similarity: leaning NEGATIVE (label=0)")
-
-        # 检索置信度
-        top_score = retrieved_examples[0].get('retrieval_score', 0) if retrieved_examples else 0
-        if top_score > 0.8:
-            parts.append(f"  Retrieval confidence: HIGH (top similarity={top_score:.3f})")
-        elif top_score > 0.5:
-            parts.append(f"  Retrieval confidence: MODERATE (top similarity={top_score:.3f})")
-        else:
-            parts.append(f"  Retrieval confidence: LOW (top similarity={top_score:.3f}) — rely more on graph embedding")
-
-    # 简短直接的指令
+    # 强调 graph embedding 是主要信号
     parts.append(
-        "\nBased on the graph embedding and reference information, predict the label."
+        "\nUse the graph embedding as the primary signal for classification. "
+        "The reference graphs provide additional context but should not override "
+        "the information from the graph embedding."
         "\nAnswer with a single digit (0 or 1):"
     )
 
