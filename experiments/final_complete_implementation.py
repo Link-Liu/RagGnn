@@ -287,11 +287,11 @@ class TransferExperiment:
             num_workers=0, pin_memory=(self.device == 'cuda')
         )
 
-        # ---- 优化器（包含 GNN + Projector + 辅助分类头）----
+        # ---- 优化器（base_tokens 用更高 lr，需要快速收敛到 LLM 能理解的空间）----
         optimizer = torch.optim.AdamW([
             {"params": self.llm.gnn.parameters(), "lr": lr_gnn},
-            {"params": self.llm.projector.parameters(), "lr": lr_proj},
-            {"params": self.llm.cls_head.parameters(), "lr": lr_proj},
+            {"params": [self.llm.projector.base_tokens], "lr": 1e-3},       # 高 lr: prompt tuning
+            {"params": self.llm.projector.delta_proj.parameters(), "lr": lr_proj},  # 低 lr: 小扰动
         ], weight_decay=1e-5)
 
         # warmup 步数基于优化器实际更新步数（而非 batch 步数）
@@ -315,7 +315,6 @@ class TransferExperiment:
         for epoch in range(1, train_epochs + 1):
             self.llm.gnn.train()
             self.llm.projector.train()
-            self.llm.cls_head.train()
             optimizer.zero_grad()
             epoch_loss, n_steps = 0.0, 0
             train_correct, train_total = 0, 0
@@ -361,7 +360,6 @@ class TransferExperiment:
             # ---- 验证（源域验证集，同样无 RAG） ----
             self.llm.gnn.eval()
             self.llm.projector.eval()
-            self.llm.cls_head.eval()
             val_loss, val_steps = 0.0, 0
             val_correct, val_total = 0, 0
             with torch.no_grad():
@@ -400,7 +398,6 @@ class TransferExperiment:
                 best_state = {
                     "gnn": {k: v.cpu().clone() for k, v in self.llm.gnn.state_dict().items()},
                     "projector": {k: v.cpu().clone() for k, v in self.llm.projector.state_dict().items()},
-                    "cls_head": {k: v.cpu().clone() for k, v in self.llm.cls_head.state_dict().items()},
                 }
                 print(f"  ← best ✓")
             else:
@@ -414,18 +411,14 @@ class TransferExperiment:
         if best_state:
             self.llm.gnn.load_state_dict(best_state["gnn"])
             self.llm.projector.load_state_dict(best_state["projector"])
-            if "cls_head" in best_state:
-                self.llm.cls_head.load_state_dict(best_state["cls_head"])
             self.llm.gnn.to(self.device)
             self.llm.projector.to(self.device)
-            self.llm.cls_head.to(self.device)
             Path(ckpt_proj).parent.mkdir(parents=True, exist_ok=True)
             torch.save(best_state, ckpt_proj)
             print(f"  [Joint Train] Best checkpoint saved -> {ckpt_proj} (val_loss={best_val_loss:.4f})")
 
         self.llm.gnn.eval()
         self.llm.projector.eval()
-        self.llm.cls_head.eval()
 
     def run_transfer(self, source_name: str, target_name: str,
                      sample_size: int = 50, eval_batch_size: int = 4,
@@ -887,7 +880,7 @@ def main():
         llm_path=MODELSCOPE_MODEL_ID,
         modelscope_cache_dir=MODELSCOPE_CACHE_DIR,
         modelscope_revision=MODELSCOPE_REVISION,
-        num_graph_tokens=4,
+        num_graph_tokens=16,
         load_in_8bit=True,
     )
 

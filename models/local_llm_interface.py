@@ -95,25 +95,39 @@ class GINEncoder(nn.Module):
 # ============================================================
 class GraphProjector(nn.Module):
     """
-    改进版 Projector，参考 LLaVA 的 MLP Projector。
-    
-    相比原版（Linear→Sigmoid→Linear）的改进：
-      - GELU 替代 Sigmoid：避免梯度饱和，梯度信号更强
-      - 加入 LayerNorm：稳定训练过程
-      - 增加网络深度：更强的映射能力
+    残差式 Graph Projector — 解决冻结 LLM 无法理解 soft tokens 的问题。
+
+    核心思路：
+      soft_token = base_tokens + scale * delta(graph_emb)
+
+      - base_tokens: 可学习参数，被 gen_loss 直接优化（类似 prompt tuning）
+        → 会快速收敛到 LLM embedding 空间中合适的位置
+      - delta: 由 GNN embedding 产生的小扰动
+        → 提供图级别的区分能力
+
+    这样 LLM 主要看到"它认识的" base_tokens（在其 embedding 空间内），
+    delta 提供微小但关键的图特定偏移来影响分类结果。
     """
-    def __init__(self, gnn_dim: int, llm_dim: int, num_tokens: int = 8):
+    def __init__(self, gnn_dim: int, llm_dim: int, num_tokens: int = 8,
+                 delta_scale: float = 0.1):
         super().__init__()
         self.num_tokens = num_tokens
         self.llm_dim = llm_dim
-        mid_dim = min(gnn_dim * 4, llm_dim)
-        self.proj = nn.Sequential(
-            nn.Linear(gnn_dim, mid_dim),
+        self.delta_scale = delta_scale
+
+        # ---- 可学习的 base tokens（类似 prompt tuning）----
+        # 这些参数被 gen_loss 直接优化，不需要穿过 Projector MLP
+        self.base_tokens = nn.Parameter(
+            torch.randn(num_tokens, llm_dim) * 0.02
+        )
+
+        # ---- 图特定的扰动网络（参数量大幅减小）----
+        # gnn_dim(128) → 256 → num_tokens * llm_dim
+        # 只需要生成"偏移量"，不需要生成完整的 token embedding
+        self.delta_proj = nn.Sequential(
+            nn.Linear(gnn_dim, gnn_dim * 2),
             nn.GELU(),
-            nn.LayerNorm(mid_dim),
-            nn.Linear(mid_dim, mid_dim),
-            nn.GELU(),
-            nn.Linear(mid_dim, llm_dim * num_tokens),
+            nn.Linear(gnn_dim * 2, llm_dim * num_tokens),
         )
 
     def forward(self, graph_emb: torch.Tensor) -> torch.Tensor:
@@ -122,8 +136,16 @@ class GraphProjector(nn.Module):
         return:    [B, num_tokens, llm_dim]
         """
         B = graph_emb.size(0)
-        out = self.proj(graph_emb)
-        return out.view(B, self.num_tokens, self.llm_dim)
+
+        # base: 所有图共享的基础 tokens，被 gen_loss 直接优化
+        base = self.base_tokens.unsqueeze(0).expand(B, -1, -1)  # [B, num_tok, llm_dim]
+
+        # delta: 每个图特有的扰动
+        delta = self.delta_proj(graph_emb)                       # [B, num_tok * llm_dim]
+        delta = delta.view(B, self.num_tokens, self.llm_dim)     # [B, num_tok, llm_dim]
+
+        # 残差组合：base（LLM 能理解）+ 小扰动（图特定信息）
+        return base + self.delta_scale * delta
 
 
 
@@ -254,16 +276,6 @@ class LocalLLMInterface:
             num_tokens=num_graph_tokens,
         ).to(self.device)
 
-        # ---- 辅助分类头（从 Projector 输出的 soft tokens 做二分类）----
-        # 梯度路径: cls_loss → cls_head → soft_tokens → Projector → GNN
-        # 同时训练 Projector 和 GNN，解决 Projector 收不到梯度的问题
-        self.cls_head = nn.Sequential(
-            nn.Linear(llm_dim, gnn_hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(gnn_hidden_dim, 2),
-        ).to(self.device)
-
         print(f"[GNN] node_feat={num_node_features}, hidden={gnn_hidden_dim}, "
               f"layers={gnn_num_layers}, graph_tokens={num_graph_tokens}")
 
@@ -278,8 +290,7 @@ class LocalLLMInterface:
     # ----------------------------------------------------------
     def trainable_parameters(self):
         return (list(self.gnn.parameters()) 
-                + list(self.projector.parameters())
-                + list(self.cls_head.parameters()))
+                + list(self.projector.parameters()))
 
     # ----------------------------------------------------------
     # 图编码
@@ -324,20 +335,18 @@ class LocalLLMInterface:
         pyg_batch,
         prompts: List[str],
         labels_text: List[str],
-        cls_weight: float = 2.0,
+
         **kwargs,
     ) -> Tuple[torch.Tensor, float]:
         """
-        生成式 loss + 辅助分类 loss：训练 GNN + Projector + cls_head。
+        生成式 loss + embedding 对齐 loss：训练 GNN + Projector（残差式）。
         
-        双重梯度流向：
-          1. gen_loss → LLM(frozen) → soft_tokens → Projector → graph_emb → GNN
-          2. cls_loss → cls_head → graph_emb → GNN  (直接梯度，不经过 LLM)
+        梯度流向：
+          1. gen_loss → LLM(frozen) → soft_tokens(base+delta) → Projector → GNN
+          2. align_loss → soft_tokens → Projector → GNN
         
-        辅助分类头解决"梯度穿不透冻结 LLM"的问题，为 GNN 提供直接的分类梯度信号。
-        
-        Args:
-            cls_weight: 辅助分类 loss 的权重，默认 0.5
+        base_tokens 被 gen_loss 直接优化（类似 prompt tuning），
+        delta_proj 提供图特定的扰动。
         
         Returns:
             (loss, accuracy): loss 用于反向传播，accuracy 用于监控训练效果
@@ -348,14 +357,8 @@ class LocalLLMInterface:
         graph_emb = self._encode_graph(pyg_batch)          # [B, hidden]
         soft_tokens = self._get_soft_tokens(graph_emb)     # [B, num_tok, llm_dim]
 
-        # 2. 辅助分类 loss（从 soft tokens 分类，梯度穿过 Projector + GNN）
+        # 2. 真实标签（用于 accuracy 计算）
         true_labels = [int(l) for l in labels_text]
-        true_labels_tensor = torch.tensor(true_labels, device=self.device, dtype=torch.long)
-        # 对 soft_tokens 做均值池化: [B, num_tok, llm_dim] → [B, llm_dim]
-        soft_tokens_pooled = soft_tokens.mean(dim=1)
-        cls_logits = self.cls_head(soft_tokens_pooled)     # [B, 2]
-        cls_loss = F.cross_entropy(cls_logits, true_labels_tensor)
-        cls_preds = cls_logits.argmax(dim=-1)
 
         # 3. Embedding 对齐 loss（让 soft tokens 留在 LLM 能理解的空间内）
         #    核心思想：soft tokens 应靠近 LLM 词表中的真实 token embedding,
@@ -439,13 +442,12 @@ class LocalLLMInterface:
                     correct += 1
         accuracy = correct / max(B, 1)
 
-        # 10. 三重 loss：
-        #   gen_loss  — LLM 生成 loss（弱信号，但训练 LLM 关联 soft tokens 与标签）
-        #   cls_loss  — 辅助分类 loss（强信号，训练 Projector + GNN）
+        # 10. 双重 loss：
+        #   gen_loss   — LLM 生成 loss（直接优化 base_tokens + delta_proj）
         #   align_loss — embedding 对齐 loss（保持 soft tokens 在 LLM 能理解的空间）
         gen_loss = outputs.loss
         align_weight = 0.5
-        total_loss = gen_loss + cls_weight * cls_loss + align_weight * align_loss
+        total_loss = gen_loss + align_weight * align_loss
 
         return total_loss, accuracy
 
@@ -681,10 +683,6 @@ class LocalLLMInterface:
             self.projector.cpu()
             del self.projector
             self.projector = None
-        if hasattr(self, 'cls_head') and self.cls_head is not None:
-            self.cls_head.cpu()
-            del self.cls_head
-            self.cls_head = None
 
         self._label_cache.clear()
         gc.collect()
@@ -706,7 +704,6 @@ class LocalLLMInterface:
         torch.save({
             'gnn': self.gnn.state_dict(),
             'projector': self.projector.state_dict(),
-            'cls_head': self.cls_head.state_dict(),
         }, path)
         print(f"[Checkpoint] Saved -> {path}")
 
@@ -717,7 +714,5 @@ class LocalLLMInterface:
         ckpt = torch.load(path, map_location=self.device)
         self.gnn.load_state_dict(ckpt['gnn'])
         self.projector.load_state_dict(ckpt['projector'])
-        if 'cls_head' in ckpt:
-            self.cls_head.load_state_dict(ckpt['cls_head'])
         print(f"[Checkpoint] Loaded <- {path}")
         return True
