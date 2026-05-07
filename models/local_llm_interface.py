@@ -254,11 +254,11 @@ class LocalLLMInterface:
             num_tokens=num_graph_tokens,
         ).to(self.device)
 
-        # ---- 辅助分类头（直接从 GNN embedding 做二分类）----
-        # 解决“生成式 loss 信号穿不透冻结 LLM”的问题
-        # 提供不经过 LLM 的直接梯度信号给 GNN
+        # ---- 辅助分类头（从 Projector 输出的 soft tokens 做二分类）----
+        # 梯度路径: cls_loss → cls_head → soft_tokens → Projector → GNN
+        # 同时训练 Projector 和 GNN，解决 Projector 收不到梯度的问题
         self.cls_head = nn.Sequential(
-            nn.Linear(gnn_hidden_dim, gnn_hidden_dim),
+            nn.Linear(llm_dim, gnn_hidden_dim),
             nn.ReLU(),
             nn.Dropout(0.1),
             nn.Linear(gnn_hidden_dim, 2),
@@ -324,7 +324,7 @@ class LocalLLMInterface:
         pyg_batch,
         prompts: List[str],
         labels_text: List[str],
-        cls_weight: float = 0.5,
+        cls_weight: float = 2.0,
         **kwargs,
     ) -> Tuple[torch.Tensor, float]:
         """
@@ -348,25 +348,44 @@ class LocalLLMInterface:
         graph_emb = self._encode_graph(pyg_batch)          # [B, hidden]
         soft_tokens = self._get_soft_tokens(graph_emb)     # [B, num_tok, llm_dim]
 
-        # 2. 辅助分类 loss（直接从 GNN embedding 分类，不经过 LLM）
+        # 2. 辅助分类 loss（从 soft tokens 分类，梯度穿过 Projector + GNN）
         true_labels = [int(l) for l in labels_text]
         true_labels_tensor = torch.tensor(true_labels, device=self.device, dtype=torch.long)
-        cls_logits = self.cls_head(graph_emb)              # [B, 2]
+        # 对 soft_tokens 做均值池化: [B, num_tok, llm_dim] → [B, llm_dim]
+        soft_tokens_pooled = soft_tokens.mean(dim=1)
+        cls_logits = self.cls_head(soft_tokens_pooled)     # [B, 2]
         cls_loss = F.cross_entropy(cls_logits, true_labels_tensor)
         cls_preds = cls_logits.argmax(dim=-1)
 
-        # 3. 用 chat template 包装后 tokenize
+        # 3. Embedding 对齐 loss（让 soft tokens 留在 LLM 能理解的空间内）
+        #    核心思想：soft tokens 应靠近 LLM 词表中的真实 token embedding,
+        #    这样冻结的 LLM 才能正确处理它们（而非当作噪声忽略）
+        embed_fn = self.llm.get_input_embeddings()
+        with torch.no_grad():
+            # 随机采样 256 个真实 token embedding 作为锚点
+            vocab_size = embed_fn.weight.shape[0]
+            sample_ids = torch.randint(0, vocab_size, (256,), device=self.device)
+            anchor_embeds = embed_fn(sample_ids)                       # [256, llm_dim]
+            anchor_norm = F.normalize(anchor_embeds.float(), dim=-1)   # [256, llm_dim]
+
+        # 计算每个 soft token 与最近真实 token 的余弦相似度
+        soft_flat = soft_tokens.view(-1, soft_tokens.size(-1)).float()  # [B*num_tok, llm_dim]
+        soft_norm = F.normalize(soft_flat, dim=-1)
+        cos_sim = torch.mm(soft_norm, anchor_norm.t())    # [B*num_tok, 256]
+        max_sim = cos_sim.max(dim=-1).values              # [B*num_tok]
+        align_loss = (1.0 - max_sim).mean()               # 越接近真实 token 越好
+
+        # 4. 用 chat template 包装后 tokenize
         wrapped = self._wrap_chat_template(prompts)
         text_enc = self.tokenizer(wrapped, add_special_tokens=False)
         label_enc = self.tokenizer(labels_text, add_special_tokens=False)
 
-        # 4. 获取特殊 token 的 embedding
-        embed_fn = self.llm.get_input_embeddings()
+        # 5. 获取特殊 token 的 embedding
         bos_embed = embed_fn(torch.tensor([self.tokenizer.bos_token_id], device=self.device))
         pad_embed = embed_fn(torch.tensor([self.tokenizer.pad_token_id], device=self.device))
         soft_tokens = soft_tokens.to(bos_embed.dtype)
 
-        # 5. 逐样本手动拼接 embeddings
+        # 6. 逐样本手动拼接 embeddings
         batch_inputs_embeds = []
         batch_attention_mask = []
         batch_label_ids = []
@@ -384,7 +403,7 @@ class LocalLLMInterface:
             label_for_loss = [-100] * n_ignore + label_ids_i
             batch_label_ids.append(label_for_loss)
 
-        # 6. 左侧 padding 对齐
+        # 7. 左侧 padding 对齐
         max_length = max(x.shape[0] for x in batch_inputs_embeds)
         for i in range(B):
             pad_len = max_length - batch_inputs_embeds[i].shape[0]
@@ -397,7 +416,7 @@ class LocalLLMInterface:
         attention_mask = torch.tensor(batch_attention_mask, device=self.device)
         label_ids = torch.tensor(batch_label_ids, device=self.device)
 
-        # 7. LLM 前向
+        # 8. LLM 前向
         outputs = self.llm(
             inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,
@@ -406,7 +425,7 @@ class LocalLLMInterface:
             use_cache=False,
         )
 
-        # 8. 从 LLM logits 提取 accuracy（零额外计算开销）
+        # 9. 从 LLM logits 提取 accuracy（零额外计算开销）
         token_0_id = self.tokenizer.encode("0", add_special_tokens=False)[0]
         token_1_id = self.tokenizer.encode("1", add_special_tokens=False)[0]
         correct = 0
@@ -420,9 +439,13 @@ class LocalLLMInterface:
                     correct += 1
         accuracy = correct / max(B, 1)
 
-        # 9. 组合 loss：生成式 loss + 辅助分类 loss
+        # 10. 三重 loss：
+        #   gen_loss  — LLM 生成 loss（弱信号，但训练 LLM 关联 soft tokens 与标签）
+        #   cls_loss  — 辅助分类 loss（强信号，训练 Projector + GNN）
+        #   align_loss — embedding 对齐 loss（保持 soft tokens 在 LLM 能理解的空间）
         gen_loss = outputs.loss
-        total_loss = gen_loss + cls_weight * cls_loss
+        align_weight = 0.5
+        total_loss = gen_loss + cls_weight * cls_loss + align_weight * align_loss
 
         return total_loss, accuracy
 
