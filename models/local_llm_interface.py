@@ -130,13 +130,19 @@ class GraphProjector(nn.Module):
             torch.randn(num_tokens, llm_dim) * 0.02
         )
 
-        # ---- 图特定的扰动网络（参数量大幅减小）----
-        # gnn_dim(128) → 256 → num_tokens * llm_dim
-        # 只需要生成"偏移量"，不需要生成完整的 token embedding
-        self.delta_proj = nn.Sequential(
-            nn.Linear(gnn_dim, gnn_dim * 2),
+        # ---- 图特定的扰动网络（低秩分解：大幅减少参数量）----
+        # 原始：gnn_dim → num_tokens * llm_dim（参数爆炸！32*4096=131K 输出维度）
+        # 低秩：gnn_dim → 256（共享扰动向量）→ 每个 token 的缩放
+        # 参数量：128*512 + 256*4096 ≈ 1.1M（原来 33.5M 的 3%）
+        self.delta_shared = nn.Sequential(
+            nn.Linear(gnn_dim, 256),
             nn.GELU(),
-            nn.Linear(gnn_dim * 2, llm_dim * num_tokens),
+            nn.Linear(256, llm_dim),   # 共享的扰动方向 [llm_dim]
+        )
+        # 每个 token 的缩放因子：学习 graph_emb → [num_tokens] 的权重
+        self.delta_token_gate = nn.Sequential(
+            nn.Linear(gnn_dim, num_tokens),
+            nn.Tanh(),  # [-1, 1]，允许不同 token 有不同方向的扰动
         )
 
     def forward(self, graph_emb: torch.Tensor) -> torch.Tensor:
@@ -149,9 +155,11 @@ class GraphProjector(nn.Module):
         # base: 所有图共享的基础 tokens，被 gen_loss 直接优化
         base = self.base_tokens.unsqueeze(0).expand(B, -1, -1)  # [B, num_tok, llm_dim]
 
-        # delta: 每个图特有的扰动
-        delta = self.delta_proj(graph_emb)                       # [B, num_tok * llm_dim]
-        delta = delta.view(B, self.num_tokens, self.llm_dim)     # [B, num_tok, llm_dim]
+        # delta: 低秩分解 — 共享方向 + 逐 token 缩放
+        delta_dir = self.delta_shared(graph_emb)             # [B, llm_dim] 共享扰动方向
+        token_gate = self.delta_token_gate(graph_emb)        # [B, num_tokens] 逐 token 缩放
+        # [B, num_tokens, 1] * [B, 1, llm_dim] → [B, num_tokens, llm_dim]
+        delta = token_gate.unsqueeze(-1) * delta_dir.unsqueeze(1)
 
         # 残差组合：base（LLM 能理解）+ 小扰动（图特定信息）
         return base + self.delta_scale * delta
@@ -466,23 +474,7 @@ class LocalLLMInterface:
                     correct += 1
         accuracy = correct / max(B, 1)
 
-        # 10. base_tokens 居中约束: 防止 base_tokens 偏向某一类别
-        #     如果 batch 中所有样本的 logit 都偏向同一侧，说明 base_tokens 有偏置
-        #     用 batch 平均 logit 差的平方作为惩罚（零额外前向开销）
-        batch_logit_diffs = []
-        for i in range(B):
-            label_positions = (label_ids[i] != -100).nonzero(as_tuple=True)[0]
-            if len(label_positions) > 0:
-                pred_pos = label_positions[0] - 1
-                logit_diff = outputs.logits[i, pred_pos, token_0_id] - outputs.logits[i, pred_pos, token_1_id]
-                batch_logit_diffs.append(logit_diff)
-        if batch_logit_diffs:
-            mean_logit_diff = torch.stack(batch_logit_diffs).mean()
-            base_balance_loss = mean_logit_diff ** 2  # 约束均值 logit 差接近 0
-        else:
-            base_balance_loss = torch.tensor(0.0, device=self.device)
-
-        # 11. delta 对比损失：直接训练 delta 对不同类别产生不同扰动
+        # 10. delta 对比损失：直接训练 delta 对不同类别产生不同扰动
         #     同类 delta 靠近，异类 delta 远离 → 不经过 LLM 的直接监督信号
         delta_only = soft_tokens - self.projector.base_tokens.unsqueeze(0).to(soft_tokens.dtype)
         delta_pooled = delta_only.mean(dim=1)  # [B, llm_dim]
@@ -508,15 +500,12 @@ class LocalLLMInterface:
         if torch.isnan(contrastive_loss) or torch.isinf(contrastive_loss):
             contrastive_loss = torch.tensor(0.0, device=self.device)
 
-        # 12. 四重 loss：
+        # 11. 三重 loss（移除了有缺陷的 balance_loss）：
+        #   gen_loss         — LLM 生成 loss
+        #   align_loss       — embedding 对齐
+        #   contrastive_loss — delta 区分度（直接训练信号，不经过 LLM）
         gen_loss = outputs.loss
-        align_weight = 0.5
-        balance_weight = 1.0      # 增大 100x：强制 base_tokens 保持中性
-        contrastive_weight = 0.1  # 降低：避免与 gen_loss 冲突
-        total_loss = (gen_loss 
-                      + align_weight * align_loss 
-                      + balance_weight * base_balance_loss 
-                      + contrastive_weight * contrastive_loss)
+        total_loss = gen_loss + 0.5 * align_loss + 0.1 * contrastive_loss
 
         return total_loss, accuracy
 

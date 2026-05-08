@@ -501,7 +501,7 @@ class TransferExperiment:
         print(f"[Eval] Evaluating on ALL {n_target} target domain graphs (none used in training)")
 
         prop_desc = self.PROP_DESC.get(target_name.lower(), target_name)
-        predictions, true_labels, details = [], [], []
+        predictions, true_labels, prob_scores, details = [], [], [], []
         failed = 0
         # B1: 改为按 Batch 推理
         from torch_geometric.data import Batch as PyGBatch
@@ -526,7 +526,7 @@ class TransferExperiment:
 
                 batch_prompts = []
                 for i, data in enumerate(batch_data):
-                    graph_info = extract_graph_info(data, f"{target_name}_batch", target_name)
+                    graph_info = extract_graph_info(data, f"{target_name}_{batch_indices[i]}", target_name)
                     emb = batch_embs[i]
                     
                     # RAG 检索
@@ -555,6 +555,7 @@ class TransferExperiment:
                     
                     predictions.append(pred)
                     true_labels.append(true_label)
+                    prob_scores.append(res.get('prob_1', float(pred)))
                     detail = {
                         'graph_id': f"{target_name}_{batch_indices[i]}",
                         'true_label': true_label,
@@ -574,7 +575,7 @@ class TransferExperiment:
                 print(f"  [ERROR] batch {start_pos+1}-{end_pos}: {e}")
 
         # 5. 计算指标
-        metrics = self._compute_metrics(predictions, true_labels)
+        metrics = self._compute_metrics(predictions, true_labels, prob_scores)
         if metrics:
             self._print_metrics(f"{source_name}->{target_name}", metrics,
                                 len(predictions), failed)
@@ -634,7 +635,7 @@ class TransferExperiment:
         print(f"[No-RAG] Evaluating on ALL {n_target} target domain graphs (none used in training)")
 
         prop_desc = self.PROP_DESC.get(target_name.lower(), target_name)
-        predictions, true_labels, details = [], [], []
+        predictions, true_labels, prob_scores, details = [], [], [], []
         failed = 0
 
         # B1: 改为按 Batch 推理
@@ -649,8 +650,8 @@ class TransferExperiment:
 
             try:
                 batch_prompts = []
-                for data in batch_data:
-                    graph_info = extract_graph_info(data, f"{target_name}_batch", target_name)
+                for bi, data in enumerate(batch_data):
+                    graph_info = extract_graph_info(data, f"{target_name}_{batch_indices[bi]}", target_name)
                     prompt = create_no_rag_prompt(
                         target_graph_info=graph_info,
                         property_description=prop_desc,
@@ -673,6 +674,7 @@ class TransferExperiment:
                     
                     predictions.append(pred)
                     true_labels.append(true_label)
+                    prob_scores.append(res.get('prob_1', float(pred)))
                     detail = {
                         'graph_id': f"{target_name}_{batch_indices[i]}",
                         'true_label': true_label,
@@ -691,7 +693,7 @@ class TransferExperiment:
                 failed += len(batch_indices)
                 print(f"  [ERROR] batch {start_pos+1}-{end_pos}: {e}")
 
-        metrics = self._compute_metrics(predictions, true_labels)
+        metrics = self._compute_metrics(predictions, true_labels, prob_scores)
         if metrics:
             self._print_metrics(f"[No-RAG] {source_name}->{target_name}",
                                 metrics, len(predictions), failed)
@@ -704,7 +706,7 @@ class TransferExperiment:
             'llm_calls': self.llm.call_count if self.llm is not None else 0,
         }
 
-    def _compute_metrics(self, predictions, true_labels) -> Dict:
+    def _compute_metrics(self, predictions, true_labels, prob_scores=None) -> Dict:
         if not predictions:
             return {}
         metrics = {
@@ -714,7 +716,9 @@ class TransferExperiment:
             'recall': float(recall_score(true_labels, predictions, zero_division=0)),
         }
         if len(set(true_labels)) > 1:
-            metrics['auc'] = float(roc_auc_score(true_labels, predictions))
+            # 使用概率值计算 AUC（正确做法），回退到离散预测
+            auc_scores = prob_scores if prob_scores else predictions
+            metrics['auc'] = float(roc_auc_score(true_labels, auc_scores))
         else:
             metrics['auc'] = float('nan')
         return metrics
@@ -893,7 +897,7 @@ def main():
         llm_path=MODELSCOPE_MODEL_ID,
         modelscope_cache_dir=MODELSCOPE_CACHE_DIR,
         modelscope_revision=MODELSCOPE_REVISION,
-        num_graph_tokens=16,
+        num_graph_tokens=32,
         load_in_8bit=True,
     )
 
