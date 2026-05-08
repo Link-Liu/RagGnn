@@ -186,7 +186,7 @@ class DomainDiscriminator(nn.Module):
 # ============================================================
 
 # ModelScope 配置
-MODEL_ID = os.environ.get("MODELSCOPE_MODEL_ID", "Qwen/Qwen2.5-3B-Instruct")
+MODEL_ID = os.environ.get("MODELSCOPE_MODEL_ID", "LLM-Research/Meta-Llama-3.1-8B-Instruct")
 MODELSCOPE_CACHE_DIR = os.environ.get("MODELSCOPE_CACHE_DIR", None)
 MODELSCOPE_REVISION = os.environ.get("MODELSCOPE_REVISION", "master")
 
@@ -201,7 +201,7 @@ class GraphLLMv2(nn.Module):
         num_node_features: int,
         gnn_hidden_dim: int = 128,
         gnn_num_layers: int = 3,
-        num_query_tokens: int = 8,
+        num_query_tokens: int = 16,
         connector_layers: int = 2,
         model_name_or_path: str = MODEL_ID,
         cache_dir: str = MODELSCOPE_CACHE_DIR,

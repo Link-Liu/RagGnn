@@ -457,7 +457,7 @@ class TransferExperiment:
                     prompts.append(p)
                 
                 labels_text = [str(int(y.item())) for y in batch.y]
-                with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.bfloat16):
+                with torch.amp.autocast('cuda', enabled=use_amp, dtype=torch.bfloat16):
                     loss, acc = self.llm.compute_loss(
                         batch, prompts, labels_text,
                     )
@@ -501,7 +501,7 @@ class TransferExperiment:
                         prompts.append(p)
                     
                     labels_text = [str(int(y.item())) for y in batch.y]
-                    with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.bfloat16):
+                    with torch.amp.autocast('cuda', enabled=use_amp, dtype=torch.bfloat16):
                         loss, acc = self.llm.compute_loss(
                             batch, prompts, labels_text,
                         )

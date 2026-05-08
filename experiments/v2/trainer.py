@@ -158,7 +158,7 @@ class JointTrainer:
                 )
                 labels_text = [self.LABEL_MAP[int(y.item())] for y in batch.y]
 
-                with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.bfloat16):
+                with torch.amp.autocast('cuda', enabled=use_amp, dtype=torch.bfloat16):
                     cls_loss, acc = self.model.compute_cls_loss(batch, prompts, labels_text)
                     loss = cls_loss / grad_accum
 
