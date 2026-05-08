@@ -637,6 +637,7 @@ class TransferExperiment:
 
         # 5b. ========== 源域验证集评估（诊断：模型在源域学得如何）==========
         print(f"\n[Source-Eval] Evaluating on source domain validation set ({source_name}) ...")
+        # pyrefly: ignore [missing-import]
         from torch_geometric.data import Batch as PyGBatch
         # 用固定种子打乱，确保验证集包含两个类别（TUDataset 通常按标签排序）
         import random
@@ -684,6 +685,7 @@ class TransferExperiment:
         predictions, true_labels, prob_scores, details = [], [], [], []
         failed = 0
         # B1: 改为按 Batch 推理
+        # pyrefly: ignore [missing-import]
         from torch_geometric.data import Batch as PyGBatch
         for start_pos in range(0, n_target, eval_batch_size):
             end_pos = min(start_pos + eval_batch_size, n_target)
@@ -819,6 +821,7 @@ class TransferExperiment:
         failed = 0
 
         # B1: 改为按 Batch 推理
+        # pyrefly: ignore [missing-import]
         from torch_geometric.data import Batch as PyGBatch
         for start_pos in range(0, n_target, eval_batch_size):
             end_pos = min(start_pos + eval_batch_size, n_target)
