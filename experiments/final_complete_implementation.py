@@ -27,6 +27,7 @@ import warnings
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from sklearn.metrics import accuracy_score, roc_auc_score, f1_score, precision_score, recall_score
 from torch_geometric.loader import DataLoader
 from torch_geometric.datasets import TUDataset
