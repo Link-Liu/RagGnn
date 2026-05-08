@@ -304,7 +304,8 @@ class TransferExperiment:
         optimizer = torch.optim.AdamW([
             {"params": self.llm.gnn.parameters(), "lr": lr_gnn},
             {"params": [self.llm.projector.base_tokens], "lr": 1e-3},       # 高 lr: prompt tuning
-            {"params": self.llm.projector.delta_proj.parameters(), "lr": lr_proj},  # 低 lr: 小扰动
+            {"params": self.llm.projector.delta_shared.parameters(), "lr": lr_proj},
+            {"params": self.llm.projector.delta_token_gate.parameters(), "lr": lr_proj},
         ], weight_decay=1e-5)
 
         # warmup 步数基于优化器实际更新步数（而非 batch 步数）
