@@ -118,7 +118,7 @@ class GraphProjector(nn.Module):
     delta 提供微小但关键的图特定偏移来影响分类结果。
     """
     def __init__(self, gnn_dim: int, llm_dim: int, num_tokens: int = 8,
-                 delta_scale: float = 0.5):
+                 delta_scale: float = 1.5):
         super().__init__()
         self.num_tokens = num_tokens
         self.llm_dim = llm_dim
@@ -478,10 +478,24 @@ class LocalLLMInterface:
                     correct += 1
         accuracy = correct / max(B, 1)
 
-        # 10. delta 对比损失（margin-based，不依赖大 batch）
-        #     同类 pair: sim > margin_pos (0.5)
-        #     异类 pair: sim < margin_neg (-0.1)
-        #     每对独立计算，batch=4 也有 6 对有效样本
+        # 10. base_tokens 偏置正则化
+        #     问题：base_tokens 会学到源域的标签先验，导致所有图 prob 偏向一侧
+        #     解法：用 batch 内每个样本的 logit_diff 的绝对值均值作为惩罚
+        #     目标：让 base_tokens 产生的 logit 对 "0" 和 "1" 大致相等
+        batch_logit_abs_diffs = []
+        for i in range(B):
+            label_positions = (label_ids[i] != -100).nonzero(as_tuple=True)[0]
+            if len(label_positions) > 0:
+                pred_pos = label_positions[0] - 1
+                logit_diff = outputs.logits[i, pred_pos, token_1_id] - outputs.logits[i, pred_pos, token_0_id]
+                batch_logit_abs_diffs.append(logit_diff.abs())
+        if batch_logit_abs_diffs:
+            # 惩罚每个样本的 |logit_diff|，而非均值（避免正负抵消的问题）
+            bias_loss = torch.stack(batch_logit_abs_diffs).mean()
+        else:
+            bias_loss = torch.tensor(0.0, device=self.device)
+
+        # 11. delta 对比损失（margin-based，不依赖大 batch）
         delta_only = soft_tokens - self.projector.base_tokens.unsqueeze(0).to(soft_tokens.dtype)
         delta_pooled = delta_only.mean(dim=1)  # [B, llm_dim]
         delta_norm = F.normalize(delta_pooled.float(), dim=-1)  # [B, llm_dim]
@@ -491,19 +505,22 @@ class LocalLLMInterface:
         label_eq = (true_labels_tensor.unsqueeze(0) == true_labels_tensor.unsqueeze(1)).float()
         mask = 1.0 - torch.eye(B, device=self.device)
 
-        # margin loss：同类要求 sim > 0.5，异类要求 sim < -0.1
         margin_pos, margin_neg = 0.5, -0.1
         pos_loss = ((margin_pos - sim_matrix) * label_eq * mask).clamp(min=0)
         neg_loss = ((sim_matrix - margin_neg) * (1 - label_eq) * mask).clamp(min=0)
         n_pairs = mask.sum().clamp(min=1)
         contrastive_loss = (pos_loss.sum() + neg_loss.sum()) / n_pairs
 
-        # 11. 三重 loss（移除了有缺陷的 balance_loss）：
-        #   gen_loss         — LLM 生成 loss
-        #   align_loss       — embedding 对齐
-        #   contrastive_loss — delta 区分度（直接训练信号，不经过 LLM）
+        # 12. 四重 loss：
+        #   gen_loss         — LLM 生成 loss（主训练信号）
+        #   align_loss       — embedding 对齐（保持在 LLM 空间内）
+        #   bias_loss        — base_tokens 偏置惩罚（防止学到标签先验）
+        #   contrastive_loss — delta 区分度（直接训练 delta 的分类能力）
         gen_loss = outputs.loss
-        total_loss = gen_loss + 0.5 * align_loss + 0.1 * contrastive_loss
+        total_loss = (gen_loss
+                      + 0.5 * align_loss
+                      + 0.05 * bias_loss
+                      + 0.3 * contrastive_loss)
 
         return total_loss, accuracy
 

@@ -496,6 +496,42 @@ class TransferExperiment:
         retriever.add_source_graphs(src_embs, src_infos, src_labels)
         print(f"[RAG] Indexed {len(src_embs)} source graphs")
 
+        # 5b. ========== 源域验证集评估（诊断：模型在源域学得如何）==========
+        print(f"\n[Source-Eval] Evaluating on source domain validation set ({source_name}) ...")
+        from torch_geometric.data import Batch as PyGBatch
+        val_split = int(len(src_list) * 0.8)
+        src_val_list = src_list[val_split:]
+        src_val_preds, src_val_trues, src_val_probs = [], [], []
+        prop_desc_src = self.PROP_DESC.get(source_name.lower(), source_name)
+        for start_pos in range(0, len(src_val_list), eval_batch_size):
+            end_pos = min(start_pos + eval_batch_size, len(src_val_list))
+            batch_data = src_val_list[start_pos:end_pos]
+            try:
+                pyg_batch = PyGBatch.from_data_list(batch_data).to(self.device)
+                batch_prompts = []
+                for data in batch_data:
+                    info = extract_graph_info(data, "src_val", source_name)
+                    p = create_no_rag_prompt(
+                        target_graph_info=info,
+                        property_description=prop_desc_src,
+                        target_dataset=source_name.lower(),
+                    )
+                    batch_prompts.append(p)
+                results = self.llm.predict_with_llm_logits(pyg_batch, batch_prompts)
+                for j, res in enumerate(results):
+                    true_label = int(batch_data[j].y.item())
+                    pred = int(res.get('prediction', 0))
+                    src_val_preds.append(pred)
+                    src_val_trues.append(true_label)
+                    src_val_probs.append(res.get('prob_1', float(pred)))
+            except Exception as e:
+                print(f"  [Source-Eval ERROR] {e}")
+        
+        src_metrics = self._compute_metrics(src_val_preds, src_val_trues, src_val_probs)
+        if src_metrics:
+            self._print_metrics(f"[Source] {source_name} val", src_metrics,
+                                len(src_val_preds), 0)
+
         # 6. 在目标域全量数据上评估（纯跨域：目标域未参与任何训练）
         n_target = len(tgt_list)
         target_indices = list(range(n_target))
