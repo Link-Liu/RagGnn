@@ -511,8 +511,8 @@ class LocalLLMInterface:
         # 12. 四重 loss：
         gen_loss = outputs.loss
         align_weight = 0.5
-        balance_weight = 0.01
-        contrastive_weight = 0.5
+        balance_weight = 1.0      # 增大 100x：强制 base_tokens 保持中性
+        contrastive_weight = 0.1  # 降低：避免与 gen_loss 冲突
         total_loss = (gen_loss 
                       + align_weight * align_loss 
                       + balance_weight * base_balance_loss 

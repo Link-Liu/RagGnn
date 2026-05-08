@@ -237,7 +237,7 @@ def create_detailed_prompt(target_graph_info: Dict,
     # RAG 参考图（只提供相似度和标签，不给投票结论）
     if retrieved_examples:
         parts.append(f"\nReference graphs from {source_sem['task']}:")
-        for i, ex in enumerate(retrieved_examples[:5]):
+        for i, ex in enumerate(retrieved_examples[:3]):
             label = ex.get('label', '?')
             score = ex.get('retrieval_score', 0.0)
             label_sem = source_sem['label_pos'] if label in (1, '1') else source_sem['label_neg']
@@ -263,7 +263,7 @@ def create_detailed_prompt(target_graph_info: Dict,
 
     # 同时为 RAG 参考图也注入统计量（如果有）
     if retrieved_examples:
-        for i, ex in enumerate(retrieved_examples[:5]):
+        for i, ex in enumerate(retrieved_examples[:3]):
             ex_stats = []
             for key in ['num_nodes', 'num_edges', 'avg_degree']:
                 if key in ex:
