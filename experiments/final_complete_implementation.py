@@ -198,8 +198,98 @@ class TransferExperiment:
         self._load_in_8bit = load_in_8bit
         self.llm: Optional[LocalLLMInterface] = None
 
+    @staticmethod
+    def _add_universal_features(data_list: List, name: str):
+        """
+        为每个图添加域无关的拓扑特征（8 维），拼接到已有特征后面。
+        这些特征在所有数据集上语义一致，是跨域迁移的关键信号。
+        """
+        import networkx as nx
+        for data in data_list:
+            N = data.num_nodes
+            edge_index = data.edge_index
+
+            # 构建邻接表（用于聚类系数和 k-core）
+            adj = [set() for _ in range(N)]
+            if edge_index.numel() > 0:
+                src, dst = edge_index[0].tolist(), edge_index[1].tolist()
+                for s, d in zip(src, dst):
+                    adj[s].add(d)
+                    adj[d].add(s)
+
+            # 1. 归一化度数
+            deg = torch.tensor([len(adj[i]) for i in range(N)], dtype=torch.float32)
+            max_deg = deg.max().clamp(min=1)
+            norm_deg = deg / max_deg
+
+            # 2. log 度数
+            log_deg = torch.log1p(deg)
+            log_deg = log_deg / log_deg.max().clamp(min=1)
+
+            # 3. 图密度（broadcast 到所有节点）
+            n_edges = edge_index.shape[1] if edge_index.numel() > 0 else 0
+            density = n_edges / (N * (N - 1) + 1e-6)
+
+            # 4. 相对图大小
+            size_feat = torch.log1p(torch.tensor(float(N))) / 10.0
+
+            # 5. 局部聚类系数（三角形密度）
+            clustering = torch.zeros(N, dtype=torch.float32)
+            for i in range(N):
+                neighbors = adj[i]
+                k = len(neighbors)
+                if k < 2:
+                    continue
+                # 邻居之间的边数
+                triangles = sum(1 for u in neighbors for v in neighbors if u < v and v in adj[u])
+                clustering[i] = 2.0 * triangles / (k * (k - 1))
+
+            # 6. 邻域度数标准差（邻域多样性）
+            deg_std = torch.zeros(N, dtype=torch.float32)
+            for i in range(N):
+                if len(adj[i]) > 0:
+                    neighbor_degs = torch.tensor([len(adj[j]) for j in adj[i]], dtype=torch.float32)
+                    deg_std[i] = neighbor_degs.std() if len(neighbor_degs) > 1 else 0.0
+            deg_std_max = deg_std.max().clamp(min=1)
+            deg_std = deg_std / deg_std_max
+
+            # 7. 归一化二跳邻居数量
+            two_hop = torch.zeros(N, dtype=torch.float32)
+            for i in range(N):
+                hop2 = set()
+                for j in adj[i]:
+                    hop2.update(adj[j])
+                hop2.discard(i)
+                hop2 -= adj[i]  # 排除一跳邻居
+                two_hop[i] = len(hop2)
+            two_hop_max = two_hop.max().clamp(min=1)
+            two_hop = two_hop / two_hop_max
+
+            # 8. k-core 数（用 networkx）
+            G = nx.Graph()
+            G.add_nodes_from(range(N))
+            if edge_index.numel() > 0:
+                edges = list(zip(src, dst))
+                G.add_edges_from(edges)
+            core_numbers = nx.core_number(G)
+            kcore = torch.tensor([core_numbers.get(i, 0) for i in range(N)], dtype=torch.float32)
+            kcore_max = kcore.max().clamp(min=1)
+            kcore = kcore / kcore_max
+
+            # 拼接 [N, 8]
+            uni_feat = torch.stack([
+                norm_deg, log_deg,
+                torch.full((N,), density),
+                torch.full((N,), size_feat.item()),
+                clustering, deg_std, two_hop, kcore,
+            ], dim=-1)
+            data.x = torch.cat([data.x.float(), uni_feat], dim=-1)
+        new_dim = data_list[0].x.shape[1]
+        print(f"[Feature] Added 8 universal topo features to {name} -> dim={new_dim}")
+        return new_dim
+
     def _load_and_prepare(self, source_name: str, target_name: str):
-        """加载源域和目标域数据集，统一特征维度，返回 Data 列表。"""
+        """加载源域和目标域数据集，统一特征维度 + 添加通用拓扑特征。"""
         src_ds = load_dataset(self.data_dir, source_name)
         tgt_ds = load_dataset(self.data_dir, target_name)
 
@@ -211,6 +301,10 @@ class TransferExperiment:
         tgt_list = dataset_to_list(tgt_ds)
 
         unified_dim = unify_feature_dim_lists(src_list, tgt_list, source_name, target_name)
+
+        # 添加域无关的拓扑特征（度数、密度等）→ 跨域迁移的关键信号
+        unified_dim = self._add_universal_features(src_list, source_name)
+        self._add_universal_features(tgt_list, target_name)
 
         # 获取边特征维度
         edge_dim = 0
@@ -230,10 +324,10 @@ class TransferExperiment:
         target_name: str,
         ckpt_proj: str,
         train_epochs: int = 50,
-        train_batch_size: int = 4,
+        train_batch_size: int = 8,
         lr_gnn: float = 5e-5,
         lr_proj: float = 2e-4,
-        grad_accum_steps: int = 4,
+        grad_accum_steps: int = 2,
         train_ratio: float = 0.8,
     ):
         """
@@ -318,11 +412,10 @@ class TransferExperiment:
         # ---- 优化器（base_tokens 用更高 lr，需要快速收敛到 LLM 能理解的空间）----
         optimizer = torch.optim.AdamW([
             {"params": self.llm.gnn.parameters(), "lr": lr_gnn},
-            {"params": [self.llm.projector.base_tokens], "lr": 2e-4},
+            {"params": [self.llm.projector.base_tokens], "lr": 5e-4},
             {"params": self.llm.projector.delta_shared.parameters(), "lr": lr_proj},
             {"params": self.llm.projector.delta_token_gate.parameters(), "lr": lr_proj},
             {"params": self.llm.projector.delta_classifier.parameters(), "lr": lr_proj},
-            {"params": self.llm.domain_disc.parameters(), "lr": lr_proj},
         ], weight_decay=1e-5)
 
         # warmup 步数基于优化器实际更新步数（而非 batch 步数）
@@ -342,12 +435,8 @@ class TransferExperiment:
         patience_limit = 10
         use_amp = self.device == "cuda"
 
-        # ---- 训练循环（源域数据 + 目标域域对抗）----
-        tgt_iter = iter(tgt_loader)
+        # ---- 训练循环 ----
         for epoch in range(1, train_epochs + 1):
-            # DANN alpha schedule: 0→1 sigmoid
-            p = (epoch - 1) / max(train_epochs - 1, 1)
-            dann_alpha = 2.0 / (1.0 + np.exp(-10.0 * p)) - 1.0
             self.llm.gnn.train()
             self.llm.projector.train()
             optimizer.zero_grad()
@@ -375,35 +464,6 @@ class TransferExperiment:
                     loss = loss / grad_accum_steps
 
                 loss.backward()
-
-                # ---- 域对抗损失：迫使 GNN 学习域不变特征 ----
-                try:
-                    tgt_batch = next(tgt_iter)
-                except StopIteration:
-                    tgt_iter = iter(tgt_loader)
-                    tgt_batch = next(tgt_iter)
-                tgt_batch = tgt_batch.to(self.device)
-
-                # GNN 编码源域 + 目标域
-                src_emb = self.llm.gnn(
-                    batch.x.float(), batch.edge_index, batch.batch
-                )
-                tgt_emb = self.llm.gnn(
-                    tgt_batch.x.float(), tgt_batch.edge_index, tgt_batch.batch
-                )
-
-                # 域判别（GRL 在 domain_disc 内部）
-                src_domain_pred = self.llm.domain_disc(src_emb, dann_alpha)
-                tgt_domain_pred = self.llm.domain_disc(tgt_emb, dann_alpha)
-                domain_loss = (
-                    F.binary_cross_entropy_with_logits(
-                        src_domain_pred, torch.zeros_like(src_domain_pred)
-                    ) +
-                    F.binary_cross_entropy_with_logits(
-                        tgt_domain_pred, torch.ones_like(tgt_domain_pred)
-                    )
-                ) / 2.0
-                (0.1 * domain_loss / grad_accum_steps).backward()
                 n_steps += 1
                 epoch_loss += loss.item() * grad_accum_steps
                 train_correct += int(acc * B)
