@@ -500,8 +500,12 @@ class TransferExperiment:
         # 5b. ========== 源域验证集评估（诊断：模型在源域学得如何）==========
         print(f"\n[Source-Eval] Evaluating on source domain validation set ({source_name}) ...")
         from torch_geometric.data import Batch as PyGBatch
+        # 用固定种子打乱，确保验证集包含两个类别（TUDataset 通常按标签排序）
+        import random
+        src_indices = list(range(len(src_list)))
+        random.Random(42).shuffle(src_indices)
         val_split = int(len(src_list) * 0.8)
-        src_val_list = src_list[val_split:]
+        src_val_list = [src_list[i] for i in src_indices[val_split:]]
         src_val_preds, src_val_trues, src_val_probs = [], [], []
         prop_desc_src = self.PROP_DESC.get(source_name.lower(), source_name)
         for start_pos in range(0, len(src_val_list), eval_batch_size):
