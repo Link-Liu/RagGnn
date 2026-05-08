@@ -102,8 +102,8 @@ class GraphRetriever:
         """
         计算目标图与所有源域图的结构相似度。
 
-        使用归一化后的图统计量（节点数、边数、密度、平均度）之间的欧氏距离，
-        转换为相似度分数。
+        使用 log 空间的图统计量（避免节点/边数量级差异主导距离），
+        归一化后计算欧氏距离并转换为相似度分数。
         """
         n = len(self.source_stats)
         if n == 0:
@@ -115,19 +115,23 @@ class GraphRetriever:
         target_density = num_edges / max_edges if max_edges > 0 else 0
         target_avg_deg = (2 * num_edges / num_nodes) if num_nodes > 0 else 0
 
-        # 收集统计量矩阵
-        target_vec = np.array([num_nodes, num_edges, target_density, target_avg_deg])
+        # 对计数值取 log 空间，避免量级差异主导距离
+        target_vec = np.array([
+            np.log1p(num_nodes), np.log1p(num_edges),
+            target_density, target_avg_deg
+        ])
         source_vecs = np.array([
-            [s['num_nodes'], s['num_edges'], s['density'], s['avg_degree']]
+            [np.log1p(s['num_nodes']), np.log1p(s['num_edges']),
+             s['density'], s['avg_degree']]
             for s in self.source_stats
         ])
 
-        # Min-max 归一化 (防止节点数量级差异主导距离)
+        # Min-max 归一化
         all_vecs = np.vstack([source_vecs, target_vec.reshape(1, -1)])
         mins = all_vecs.min(axis=0)
         maxs = all_vecs.max(axis=0)
         ranges = maxs - mins
-        ranges[ranges == 0] = 1.0  # 防除零
+        ranges[ranges == 0] = 1.0
 
         norm_target = (target_vec - mins) / ranges
         norm_source = (source_vecs - mins) / ranges

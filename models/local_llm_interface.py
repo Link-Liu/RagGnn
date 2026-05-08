@@ -130,19 +130,20 @@ class GraphProjector(nn.Module):
             torch.randn(num_tokens, llm_dim) * 0.02
         )
 
-        # ---- 图特定的扰动网络（低秩分解：大幅减少参数量）----
-        # 原始：gnn_dim → num_tokens * llm_dim（参数爆炸！32*4096=131K 输出维度）
-        # 低秩：gnn_dim → 256（共享扰动向量）→ 每个 token 的缩放
-        # 参数量：128*512 + 256*4096 ≈ 1.1M（原来 33.5M 的 3%）
+        # ---- 图特定的扰动网络（低秩分解 rank-4）----
+        # rank-1 问题：32 个 token 共享一个方向，只有 1 维图信息
+        # rank-4：4 个独立方向 + 逐 token 加权混合 → 多维图信息
+        # 参数量：128→256→4*4096 + 128→32*4 ≈ 4.3M（原 33.5M 的 13%）
+        self.delta_rank = 4
         self.delta_shared = nn.Sequential(
             nn.Linear(gnn_dim, 256),
             nn.GELU(),
-            nn.Linear(256, llm_dim),   # 共享的扰动方向 [llm_dim]
+            nn.Linear(256, llm_dim * self.delta_rank),  # 4 个独立方向 [4*llm_dim]
         )
-        # 每个 token 的缩放因子：学习 graph_emb → [num_tokens] 的权重
+        # 每个 token 对 4 个方向的混合权重
         self.delta_token_gate = nn.Sequential(
-            nn.Linear(gnn_dim, num_tokens),
-            nn.Tanh(),  # [-1, 1]，允许不同 token 有不同方向的扰动
+            nn.Linear(gnn_dim, num_tokens * self.delta_rank),
+            nn.Tanh(),  # [-1, 1]
         )
 
     def forward(self, graph_emb: torch.Tensor) -> torch.Tensor:
@@ -155,11 +156,13 @@ class GraphProjector(nn.Module):
         # base: 所有图共享的基础 tokens，被 gen_loss 直接优化
         base = self.base_tokens.unsqueeze(0).expand(B, -1, -1)  # [B, num_tok, llm_dim]
 
-        # delta: 低秩分解 — 共享方向 + 逐 token 缩放
-        delta_dir = self.delta_shared(graph_emb)             # [B, llm_dim] 共享扰动方向
-        token_gate = self.delta_token_gate(graph_emb)        # [B, num_tokens] 逐 token 缩放
-        # [B, num_tokens, 1] * [B, 1, llm_dim] → [B, num_tokens, llm_dim]
-        delta = token_gate.unsqueeze(-1) * delta_dir.unsqueeze(1)
+        # delta: rank-4 分解 — 4 个方向 + 逐 token 混合
+        delta_dirs = self.delta_shared(graph_emb)  # [B, 4*llm_dim]
+        delta_dirs = delta_dirs.view(B, self.delta_rank, self.llm_dim)  # [B, 4, llm_dim]
+        token_gates = self.delta_token_gate(graph_emb)  # [B, num_tokens*4]
+        token_gates = token_gates.view(B, self.num_tokens, self.delta_rank)  # [B, num_tok, 4]
+        # [B, num_tok, 4] @ [B, 4, llm_dim] → [B, num_tok, llm_dim]
+        delta = torch.bmm(token_gates, delta_dirs)
 
         # 残差组合：base（LLM 能理解）+ 小扰动（图特定信息）
         return base + self.delta_scale * delta
@@ -416,11 +419,12 @@ class LocalLLMInterface:
         label_enc = self.tokenizer(labels_text, add_special_tokens=False)
 
         # 5. 获取特殊 token 的 embedding
-        bos_embed = embed_fn(torch.tensor([self.tokenizer.bos_token_id], device=self.device))
+        #    注意：不再手动添加 BOS，因为 apply_chat_template 已在文本开头
+        #    包含 <|begin_of_text|>，tokenize 后第一个 token 就是 BOS
         pad_embed = embed_fn(torch.tensor([self.tokenizer.pad_token_id], device=self.device))
-        soft_tokens = soft_tokens.to(bos_embed.dtype)
+        soft_tokens = soft_tokens.to(pad_embed.dtype)
 
-        # 6. 逐样本手动拼接 embeddings
+        # 6. 逐样本手动拼接 embeddings: [soft_tokens] + [text(含BOS)]
         batch_inputs_embeds = []
         batch_attention_mask = []
         batch_label_ids = []
@@ -429,7 +433,7 @@ class LocalLLMInterface:
             label_ids_i = label_enc.input_ids[i] + [self.tokenizer.eos_token_id]
             text_ids_i = text_enc.input_ids[i][:self.max_txt_len] + label_ids_i
             text_embeds = embed_fn(torch.tensor(text_ids_i, device=self.device))
-            seq_embeds = torch.cat([bos_embed, soft_tokens[i], text_embeds], dim=0)
+            seq_embeds = torch.cat([soft_tokens[i], text_embeds], dim=0)
 
             batch_inputs_embeds.append(seq_embeds)
             batch_attention_mask.append([1] * seq_embeds.shape[0])
@@ -474,31 +478,25 @@ class LocalLLMInterface:
                     correct += 1
         accuracy = correct / max(B, 1)
 
-        # 10. delta 对比损失：直接训练 delta 对不同类别产生不同扰动
-        #     同类 delta 靠近，异类 delta 远离 → 不经过 LLM 的直接监督信号
+        # 10. delta 对比损失（margin-based，不依赖大 batch）
+        #     同类 pair: sim > margin_pos (0.5)
+        #     异类 pair: sim < margin_neg (-0.1)
+        #     每对独立计算，batch=4 也有 6 对有效样本
         delta_only = soft_tokens - self.projector.base_tokens.unsqueeze(0).to(soft_tokens.dtype)
         delta_pooled = delta_only.mean(dim=1)  # [B, llm_dim]
         delta_norm = F.normalize(delta_pooled.float(), dim=-1)  # [B, llm_dim]
 
         true_labels_tensor = torch.tensor(true_labels, device=self.device)
-        # 计算 pairwise similarity matrix
         sim_matrix = torch.mm(delta_norm, delta_norm.t())  # [B, B]
-        # 创建 label mask: same_class[i,j] = 1 if same label
         label_eq = (true_labels_tensor.unsqueeze(0) == true_labels_tensor.unsqueeze(1)).float()
-        # 排除对角线
         mask = 1.0 - torch.eye(B, device=self.device)
-        # 温度缩放
-        temperature = 0.5
-        sim_scaled = sim_matrix / temperature
-        # InfoNCE 形式的对比损失
-        exp_sim = torch.exp(sim_scaled) * mask
-        pos_sum = (exp_sim * label_eq).sum(dim=1)  # 同类相似度之和
-        all_sum = exp_sim.sum(dim=1)  # 所有相似度之和
-        # 避免 log(0)
-        contrastive_loss = -torch.log(pos_sum / (all_sum + 1e-8) + 1e-8).mean()
-        # 如果 batch 中只有一个类别，contrastive_loss 可能是 nan
-        if torch.isnan(contrastive_loss) or torch.isinf(contrastive_loss):
-            contrastive_loss = torch.tensor(0.0, device=self.device)
+
+        # margin loss：同类要求 sim > 0.5，异类要求 sim < -0.1
+        margin_pos, margin_neg = 0.5, -0.1
+        pos_loss = ((margin_pos - sim_matrix) * label_eq * mask).clamp(min=0)
+        neg_loss = ((sim_matrix - margin_neg) * (1 - label_eq) * mask).clamp(min=0)
+        n_pairs = mask.sum().clamp(min=1)
+        contrastive_loss = (pos_loss.sum() + neg_loss.sum()) / n_pairs
 
         # 11. 三重 loss（移除了有缺陷的 balance_loss）：
         #   gen_loss         — LLM 生成 loss
@@ -536,10 +534,8 @@ class LocalLLMInterface:
         text_enc = self.tokenizer(wrapped, add_special_tokens=False)
 
         embed_fn = self.llm.get_input_embeddings()
-        bos_embed = embed_fn(torch.tensor([self.tokenizer.bos_token_id], device=self.device))
         pad_embed = embed_fn(torch.tensor([self.tokenizer.pad_token_id], device=self.device))
-        # 统一 dtype
-        soft_tokens = soft_tokens.to(bos_embed.dtype)
+        soft_tokens = soft_tokens.to(pad_embed.dtype)
 
         B = len(prompts)
         batch_inputs_embeds = []
@@ -548,8 +544,8 @@ class LocalLLMInterface:
         for i in range(B):
             text_ids_i = text_enc.input_ids[i][:self.max_txt_len]
             text_embeds = embed_fn(torch.tensor(text_ids_i, device=self.device))
-            # [BOS] + [graph_tokens] + [text_tokens]
-            seq_embeds = torch.cat([bos_embed, soft_tokens[i], text_embeds], dim=0)
+            # [graph_tokens] + [text_tokens(含BOS)]
+            seq_embeds = torch.cat([soft_tokens[i], text_embeds], dim=0)
             batch_inputs_embeds.append(seq_embeds)
             batch_attention_mask.append([1] * seq_embeds.shape[0])
 
@@ -648,9 +644,8 @@ class LocalLLMInterface:
         text_enc = self.tokenizer(wrapped, add_special_tokens=False)
 
         embed_fn = self.llm.get_input_embeddings()
-        bos_embed = embed_fn(torch.tensor([self.tokenizer.bos_token_id], device=self.device))
         pad_embed = embed_fn(torch.tensor([self.tokenizer.pad_token_id], device=self.device))
-        soft_tokens = soft_tokens.to(bos_embed.dtype)
+        soft_tokens = soft_tokens.to(pad_embed.dtype)
 
         B = len(prompts)
         batch_inputs_embeds = []
@@ -659,7 +654,7 @@ class LocalLLMInterface:
         for i in range(B):
             text_ids_i = text_enc.input_ids[i][:self.max_txt_len]
             text_embeds = embed_fn(torch.tensor(text_ids_i, device=self.device))
-            seq_embeds = torch.cat([bos_embed, soft_tokens[i], text_embeds], dim=0)
+            seq_embeds = torch.cat([soft_tokens[i], text_embeds], dim=0)
             batch_inputs_embeds.append(seq_embeds)
             batch_attention_mask.append([1] * seq_embeds.shape[0])
 
@@ -727,18 +722,18 @@ class LocalLLMInterface:
     # 资源释放（防止 CUDA OOM）
     # ----------------------------------------------------------
     def release(self):
-        """显式释放 GPU 显存。在重新创建 LLM 前调用。"""
+        """显式释放 GPU 显存。在重新创建 LLM 前调用。
+        注意：不使用 model.cpu()（8B 模型移到 CPU 可能导致系统卡死），
+        直接 del 并清空 CUDA 缓存。
+        """
         import gc
         if hasattr(self, 'llm') and self.llm is not None:
-            self.llm.cpu()
             del self.llm
             self.llm = None
         if hasattr(self, 'gnn') and self.gnn is not None:
-            self.gnn.cpu()
             del self.gnn
             self.gnn = None
         if hasattr(self, 'projector') and self.projector is not None:
-            self.projector.cpu()
             del self.projector
             self.projector = None
 
