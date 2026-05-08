@@ -118,7 +118,7 @@ class GraphProjector(nn.Module):
     delta 提供微小但关键的图特定偏移来影响分类结果。
     """
     def __init__(self, gnn_dim: int, llm_dim: int, num_tokens: int = 8,
-                 delta_scale: float = 1.5):
+                 delta_scale: float = 0.5):
         super().__init__()
         self.num_tokens = num_tokens
         self.llm_dim = llm_dim
@@ -144,6 +144,15 @@ class GraphProjector(nn.Module):
         self.delta_token_gate = nn.Sequential(
             nn.Linear(gnn_dim, num_tokens * self.delta_rank),
             nn.Tanh(),  # [-1, 1]
+        )
+
+        # ---- 直接分类头：绕过冻结 LLM 的梯度瓶颈 ----
+        # delta 编码了图特定信息，直接用它做分类可以给 GNN 强梯度
+        self.delta_classifier = nn.Sequential(
+            nn.Linear(llm_dim, 128),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(128, 1),
         )
 
     def forward(self, graph_emb: torch.Tensor) -> torch.Tensor:
@@ -478,29 +487,18 @@ class LocalLLMInterface:
                     correct += 1
         accuracy = correct / max(B, 1)
 
-        # 10. base_tokens 偏置正则化
-        #     问题：base_tokens 会学到源域的标签先验，导致所有图 prob 偏向一侧
-        #     解法：用 batch 内每个样本的 logit_diff 的绝对值均值作为惩罚
-        #     目标：让 base_tokens 产生的 logit 对 "0" 和 "1" 大致相等
-        batch_logit_abs_diffs = []
-        for i in range(B):
-            label_positions = (label_ids[i] != -100).nonzero(as_tuple=True)[0]
-            if len(label_positions) > 0:
-                pred_pos = label_positions[0] - 1
-                logit_diff = outputs.logits[i, pred_pos, token_1_id] - outputs.logits[i, pred_pos, token_0_id]
-                batch_logit_abs_diffs.append(logit_diff.abs())
-        if batch_logit_abs_diffs:
-            # 惩罚每个样本的 |logit_diff|，而非均值（避免正负抵消的问题）
-            bias_loss = torch.stack(batch_logit_abs_diffs).mean()
-        else:
-            bias_loss = torch.tensor(0.0, device=self.device)
-
-        # 11. delta 对比损失（margin-based，不依赖大 batch）
+        # 10. 直接分类损失：绕过冻结 LLM，给 GNN+delta 直接的分类梯度
+        #     这是最强的训练信号，不经过 LLM 的任何层
         delta_only = soft_tokens - self.projector.base_tokens.unsqueeze(0).to(soft_tokens.dtype)
         delta_pooled = delta_only.mean(dim=1)  # [B, llm_dim]
-        delta_norm = F.normalize(delta_pooled.float(), dim=-1)  # [B, llm_dim]
+        delta_logits = self.projector.delta_classifier(delta_pooled.float())  # [B, 1]
+        true_labels_tensor = torch.tensor(true_labels, dtype=torch.float32, device=self.device)
+        cls_loss = F.binary_cross_entropy_with_logits(
+            delta_logits.squeeze(-1), true_labels_tensor
+        )
 
-        true_labels_tensor = torch.tensor(true_labels, device=self.device)
+        # 11. delta 对比损失（margin-based，不依赖大 batch）
+        delta_norm = F.normalize(delta_pooled.float(), dim=-1)  # [B, llm_dim]
         sim_matrix = torch.mm(delta_norm, delta_norm.t())  # [B, B]
         label_eq = (true_labels_tensor.unsqueeze(0) == true_labels_tensor.unsqueeze(1)).float()
         mask = 1.0 - torch.eye(B, device=self.device)
@@ -512,15 +510,15 @@ class LocalLLMInterface:
         contrastive_loss = (pos_loss.sum() + neg_loss.sum()) / n_pairs
 
         # 12. 四重 loss：
-        #   gen_loss         — LLM 生成 loss（主训练信号）
-        #   align_loss       — embedding 对齐（保持在 LLM 空间内）
-        #   bias_loss        — base_tokens 偏置惩罚（防止学到标签先验）
-        #   contrastive_loss — delta 区分度（直接训练 delta 的分类能力）
+        #   gen_loss         — LLM 生成 loss（主训练信号，穿过冻结 LLM）
+        #   align_loss       — embedding 对齐（保持 soft tokens 在 LLM 空间内）
+        #   cls_loss         — 直接分类（绕过 LLM，最强梯度信号）
+        #   contrastive_loss — delta 区分度
         gen_loss = outputs.loss
         total_loss = (gen_loss
                       + 0.5 * align_loss
-                      + 0.05 * bias_loss
-                      + 0.3 * contrastive_loss)
+                      + 0.5 * cls_loss
+                      + 0.1 * contrastive_loss)
 
         return total_loss, accuracy
 
@@ -706,7 +704,8 @@ class LocalLLMInterface:
     @torch.no_grad()
     def predict_with_llm_logits(self, pyg_batch, prompts: List[str]) -> List[Dict]:
         """
-        用 LLM logits 做分类（替代 generate + regex）。
+        用 LLM logits 做分类。
+        delta_classifier 仅在训练时提供辅助梯度，推理不使用。
         """
         self.call_count += len(prompts)
         binary_logits = self._get_llm_classification_logits(pyg_batch, prompts)

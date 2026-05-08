@@ -303,9 +303,10 @@ class TransferExperiment:
         # ---- 优化器（base_tokens 用更高 lr，需要快速收敛到 LLM 能理解的空间）----
         optimizer = torch.optim.AdamW([
             {"params": self.llm.gnn.parameters(), "lr": lr_gnn},
-            {"params": [self.llm.projector.base_tokens], "lr": 5e-4},      # prompt tuning（降低避免覆盖 GNN 信号）
+            {"params": [self.llm.projector.base_tokens], "lr": 5e-4},
             {"params": self.llm.projector.delta_shared.parameters(), "lr": lr_proj},
             {"params": self.llm.projector.delta_token_gate.parameters(), "lr": lr_proj},
+            {"params": self.llm.projector.delta_classifier.parameters(), "lr": lr_proj},
         ], weight_decay=1e-5)
 
         # warmup 步数基于优化器实际更新步数（而非 batch 步数）
