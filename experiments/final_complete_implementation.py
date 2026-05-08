@@ -224,6 +224,7 @@ class TransferExperiment:
     def _joint_train(
         self,
         src_list: List,
+        tgt_list: List,
         source_name: str,
         target_name: str,
         ckpt_proj: str,
@@ -263,7 +264,7 @@ class TransferExperiment:
         val_indices   = indices[n_train:]
         print(f"  Source domain: {len(src_list)} graphs total")
         print(f"  Train: {len(train_indices)}, Val: {len(val_indices)}")
-        print(f"  Target domain: NOT used for training (pure cross-domain)")
+        print(f"  Target domain: {len(tgt_list)} graphs (unlabeled, for domain adversarial)")
         print(f"  Prompt: No-RAG (train GNN soft tokens without retrieval shortcuts)")
 
         # ---- 封装 Dataset（源域数据，无 RAG） ----
@@ -300,13 +301,27 @@ class TransferExperiment:
             num_workers=0, pin_memory=(self.device == 'cuda')
         )
 
+        # ---- 目标域 DataLoader（无标签，仅用于域对抗）----
+        class TargetDataset(torch.utils.data.Dataset):
+            def __init__(self, data_list):
+                self.data_list = data_list
+            def __len__(self): return len(self.data_list)
+            def __getitem__(self, i): return self.data_list[i]
+
+        tgt_loader = torch.utils.data.DataLoader(
+            TargetDataset(tgt_list),
+            batch_size=train_batch_size, shuffle=True, collate_fn=collate_src,
+            num_workers=0, pin_memory=(self.device == 'cuda'), drop_last=True,
+        )
+
         # ---- 优化器（base_tokens 用更高 lr，需要快速收敛到 LLM 能理解的空间）----
         optimizer = torch.optim.AdamW([
             {"params": self.llm.gnn.parameters(), "lr": lr_gnn},
-            {"params": [self.llm.projector.base_tokens], "lr": 5e-4},
+            {"params": [self.llm.projector.base_tokens], "lr": 2e-4},
             {"params": self.llm.projector.delta_shared.parameters(), "lr": lr_proj},
             {"params": self.llm.projector.delta_token_gate.parameters(), "lr": lr_proj},
             {"params": self.llm.projector.delta_classifier.parameters(), "lr": lr_proj},
+            {"params": self.llm.domain_disc.parameters(), "lr": lr_proj},
         ], weight_decay=1e-5)
 
         # warmup 步数基于优化器实际更新步数（而非 batch 步数）
@@ -320,14 +335,18 @@ class TransferExperiment:
             return max(0.1, 0.5 * (1.0 + np.cos(np.pi * progress)))
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
-        best_val_loss = float("inf")
+        best_val_auc = 0.0
         best_state = None
         patience_counter = 0
         patience_limit = 10
         use_amp = self.device == "cuda"
 
-        # ---- 训练循环（纯源域数据，无 RAG 提示词） ----
+        # ---- 训练循环（源域数据 + 目标域域对抗）----
+        tgt_iter = iter(tgt_loader)
         for epoch in range(1, train_epochs + 1):
+            # DANN alpha schedule: 0→1 sigmoid
+            p = (epoch - 1) / max(train_epochs - 1, 1)
+            dann_alpha = 2.0 / (1.0 + np.exp(-10.0 * p)) - 1.0
             self.llm.gnn.train()
             self.llm.projector.train()
             optimizer.zero_grad()
@@ -355,6 +374,35 @@ class TransferExperiment:
                     loss = loss / grad_accum_steps
 
                 loss.backward()
+
+                # ---- 域对抗损失：迫使 GNN 学习域不变特征 ----
+                try:
+                    tgt_batch = next(tgt_iter)
+                except StopIteration:
+                    tgt_iter = iter(tgt_loader)
+                    tgt_batch = next(tgt_iter)
+                tgt_batch = tgt_batch.to(self.device)
+
+                # GNN 编码源域 + 目标域
+                src_emb = self.llm.gnn(
+                    batch.x.float(), batch.edge_index, batch.batch
+                )
+                tgt_emb = self.llm.gnn(
+                    tgt_batch.x.float(), tgt_batch.edge_index, tgt_batch.batch
+                )
+
+                # 域判别（GRL 在 domain_disc 内部）
+                src_domain_pred = self.llm.domain_disc(src_emb, dann_alpha)
+                tgt_domain_pred = self.llm.domain_disc(tgt_emb, dann_alpha)
+                domain_loss = (
+                    F.binary_cross_entropy_with_logits(
+                        src_domain_pred, torch.zeros_like(src_domain_pred)
+                    ) +
+                    F.binary_cross_entropy_with_logits(
+                        tgt_domain_pred, torch.ones_like(tgt_domain_pred)
+                    )
+                ) / 2.0
+                (0.1 * domain_loss / grad_accum_steps).backward()
                 n_steps += 1
                 epoch_loss += loss.item() * grad_accum_steps
                 train_correct += int(acc * B)
@@ -403,12 +451,41 @@ class TransferExperiment:
 
             avg_val_loss = val_loss / max(val_steps, 1)
             val_acc = val_correct / max(val_total, 1)
+
+            # ---- 计算验证集 AUC（用 LLM logits 推理）----
+            val_auc = float('nan')
+            try:
+                from torch_geometric.data import Batch as PyGBatch
+                val_probs, val_trues = [], []
+                for batch in val_loader:
+                    batch = batch.to(self.device)
+                    B_val = batch.num_graphs
+                    val_prompts = []
+                    for vi in range(B_val):
+                        info = extract_graph_info(batch[vi], "val", source_name)
+                        p = create_no_rag_prompt(
+                            target_graph_info=info,
+                            property_description=prop_desc,
+                            target_dataset=source_name.lower(),
+                        )
+                        val_prompts.append(p)
+                    results = self.llm.predict_with_llm_logits(batch, val_prompts)
+                    for vi, res in enumerate(results):
+                        val_probs.append(res.get('prob_1', 0.5))
+                        val_trues.append(int(batch[vi].y.item()))
+                if len(set(val_trues)) > 1:
+                    from sklearn.metrics import roc_auc_score
+                    val_auc = roc_auc_score(val_trues, val_probs)
+            except Exception as e:
+                print(f"\n  [Val-AUC ERROR] {e}")
+
             print(f"  Epoch {epoch}/{train_epochs}  "
                   f"train_loss={avg_train_loss:.4f} train_acc={train_acc:.4f}  "
-                  f"val_loss={avg_val_loss:.4f} val_acc={val_acc:.4f}", end="")
+                  f"val_loss={avg_val_loss:.4f} val_auc={val_auc:.4f}", end="")
 
-            if avg_val_loss < best_val_loss:
-                best_val_loss = avg_val_loss
+            # Early stopping 基于 val_auc（越大越好）
+            if not np.isnan(val_auc) and val_auc > best_val_auc:
+                best_val_auc = val_auc
                 patience_counter = 0
                 best_state = {
                     "gnn": {k: v.cpu().clone() for k, v in self.llm.gnn.state_dict().items()},
@@ -430,7 +507,7 @@ class TransferExperiment:
             self.llm.projector.to(self.device)
             Path(ckpt_proj).parent.mkdir(parents=True, exist_ok=True)
             torch.save(best_state, ckpt_proj)
-            print(f"  [Joint Train] Best checkpoint saved -> {ckpt_proj} (val_loss={best_val_loss:.4f})")
+            print(f"  [Joint Train] Best checkpoint saved -> {ckpt_proj} (val_auc={best_val_auc:.4f})")
 
         self.llm.gnn.eval()
         self.llm.projector.eval()
@@ -481,7 +558,7 @@ class TransferExperiment:
         # 4. ========== 联合训练 GNN + Projector（纯源域数据） ==========
         if not Path(ckpt_proj).exists():
             self._joint_train(
-                src_list, source_name, target_name, ckpt_proj
+                src_list, tgt_list, source_name, target_name, ckpt_proj
             )
 
         # 5. 编码源域 → 构建 RAG 索引

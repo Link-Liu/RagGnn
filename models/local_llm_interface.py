@@ -100,6 +100,37 @@ class GINEncoder(nn.Module):
 
 
 # ============================================================
+# Gradient Reversal Layer（域对抗训练核心）
+# ============================================================
+class GradientReversal(torch.autograd.Function):
+    """梯度反转层：前向不变，反向时反转梯度方向。"""
+    @staticmethod
+    def forward(ctx, x, alpha):
+        ctx.alpha = alpha
+        return x.clone()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return -ctx.alpha * grad_output, None
+
+
+class DomainDiscriminator(nn.Module):
+    """域判别器：判断 GNN embedding 来自源域还是目标域。"""
+    def __init__(self, input_dim: int = 128):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, 64),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(64, 1),
+        )
+
+    def forward(self, x, alpha: float = 1.0):
+        x_rev = GradientReversal.apply(x, alpha)
+        return self.net(x_rev)
+
+
+# ============================================================
 # Graph Projector：GNN 嵌入 → LLM 词嵌入空间
 # ============================================================
 class GraphProjector(nn.Module):
@@ -305,6 +336,11 @@ class LocalLLMInterface:
             num_tokens=num_graph_tokens,
         ).to(self.device)
 
+        # ---- Domain Discriminator（域对抗训练）----
+        self.domain_disc = DomainDiscriminator(
+            input_dim=gnn_hidden_dim,
+        ).to(self.device)
+
         embed_fn = self.llm.get_input_embeddings()
 
         # ---- 用有意义的文本 embedding 初始化 base_tokens ----
@@ -334,7 +370,8 @@ class LocalLLMInterface:
     # ----------------------------------------------------------
     def trainable_parameters(self):
         return (list(self.gnn.parameters()) 
-                + list(self.projector.parameters()))
+                + list(self.projector.parameters())
+                + list(self.domain_disc.parameters()))
 
     # ----------------------------------------------------------
     # 图编码
@@ -517,7 +554,7 @@ class LocalLLMInterface:
         gen_loss = outputs.loss
         total_loss = (gen_loss
                       + 0.5 * align_loss
-                      + 0.5 * cls_loss
+                      + 0.1 * cls_loss
                       + 0.1 * contrastive_loss)
 
         return total_loss, accuracy
