@@ -1,8 +1,7 @@
 """
 V2 评估器：
-  - Logits AUC: 比较 Enzyme vs Non-enzyme 首 token logits
-  - Exact Match: LLM generate → 正则匹配
-  - 完整评估报告
+  - Logits AUC: 比较 token '1' vs '0' logits
+  - 标准 0.5 阈值（因为 0/1 token 无先验偏差）
 """
 import torch, numpy as np, json
 from typing import List, Dict
@@ -25,12 +24,8 @@ class Evaluator:
         tgt_list: List,
         target_name: str,
         batch_size: int = 4,
-        method: str = "logits",
     ) -> Dict:
-        """
-        评估目标域。
-        method: 'logits' 或 'generate'
-        """
+        """评估目标域。"""
         from torch_geometric.data import Batch as PyGBatch
         from experiments.v2.prompts import (
             SYSTEM_PROMPT, get_user_prompt, format_chat_prompt, extract_graph_stats
@@ -44,7 +39,7 @@ class Evaluator:
         predictions, true_labels, prob_scores = [], [], []
         failed = 0
 
-        print(f"[Eval] {target_name}: {n} graphs, method={method}")
+        print(f"[Eval] {target_name}: {n} graphs")
 
         for start in range(0, n, batch_size):
             end = min(start + batch_size, n)
@@ -89,7 +84,6 @@ class Evaluator:
 
         return {
             'target': target_name,
-            'method': method,
             'total': n,
             'predicted': len(predictions),
             'failed': failed,

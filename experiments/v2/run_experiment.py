@@ -141,11 +141,17 @@ def run_text_only_baseline(model, tgt_list, target_name, max_samples=200):
     from torch_geometric.data import Batch as PyGBatch
     from sklearn.metrics import roc_auc_score, accuracy_score, f1_score
 
-    samples = tgt_list[:max_samples]
     import random as _rnd
+    _all = list(tgt_list)  # 完整复制
     _rnd.seed(42)
-    _rnd.shuffle(samples)
-    print(f"\n  [Text-Only] Evaluating {len(samples)} graphs (shuffled) ...")
+    _rnd.shuffle(_all)
+    samples = _all[:max_samples]
+    # 检查类别分布
+    class_counts = {}
+    for d in samples:
+        c = int(d.y.item())
+        class_counts[c] = class_counts.get(c, 0) + 1
+    print(f"\n  [Text-Only] Evaluating {len(samples)} graphs (class dist: {class_counts})")
 
     preds, trues, probs = [], [], []
     for data in samples:
@@ -158,14 +164,14 @@ def run_text_only_baseline(model, tgt_list, target_name, max_samples=200):
             outputs = model.llm(input_ids=input_ids, return_dict=True)
             last_logits = outputs.logits[0, -1, :]
 
-        enz_logit = last_logits[model._enzyme_first_token].item()
-        non_logit = last_logits[model._non_enzyme_first_token].item()
-        exp_e, exp_n = np.exp(enz_logit), np.exp(non_logit)
-        p_enz = exp_e / (exp_e + exp_n)
+        logit_1 = last_logits[model._token_1].item()
+        logit_0 = last_logits[model._token_0].item()
+        exp_1, exp_0 = np.exp(logit_1), np.exp(logit_0)
+        p1 = exp_1 / (exp_1 + exp_0)
 
-        preds.append(1 if p_enz > 0.5 else 0)
+        preds.append(1 if p1 > 0.5 else 0)
         trues.append(int(data.y.item()))
-        probs.append(p_enz)
+        probs.append(p1)
 
     acc = accuracy_score(trues, preds)
     auc = roc_auc_score(trues, probs) if len(set(trues)) > 1 else float('nan')
@@ -230,11 +236,11 @@ def run_single(
         model.load_checkpoint(ckpt)
         print(f"  [Skip] Using existing checkpoint: {ckpt}")
 
-    # 5. 评估
+    # 6. 评估目标域
     evaluator = Evaluator(model, device)
     result = evaluator.evaluate(tgt_list, target_name, batch_size=4)
 
-    # 6. 释放显存
+    # 7. 释放显存
     del model, evaluator
     gc.collect()
     torch.cuda.empty_cache()

@@ -1,23 +1,22 @@
 """
 V2 Prompt 模板：为 LLM 设计的 System + User prompt。
-支持 LLaMA-3 chat template 格式。
+标签使用 0/1（单 token，无语义偏差）。
 """
 from typing import Dict, Optional
 
 
 SYSTEM_PROMPT = (
-    "You are an expert biological assistant. "
-    "Your task is to classify whether the given protein graph is an enzyme or a non-enzyme. "
-    "You will receive the protein graph information as embedding tokens. "
-    "Based on these embeddings, make your classification decision."
+    "You are a binary classifier for protein graphs. "
+    "Given the protein graph information, output 1 if it is an enzyme, or 0 if it is not. "
+    "Output only the number, nothing else."
 )
 
 
 def get_user_prompt(graph_stats: Optional[Dict] = None) -> str:
-    """生成 User prompt。graph_stats 可选地嵌入图统计信息。"""
+    """生成 User prompt。"""
     parts = [
-        "Determine the class of the given protein molecule. "
-        "Output the final decision strictly as either 'Enzyme' or 'Non-enzyme'."
+        "Classify the following protein graph. "
+        "Output strictly 1 (enzyme) or 0 (non-enzyme)."
     ]
     if graph_stats:
         stats_str = (
@@ -35,8 +34,8 @@ def get_user_prompt(graph_stats: Optional[Dict] = None) -> str:
 def get_text_only_prompt(graph_stats: Dict) -> str:
     """消融实验：纯文字版本（不用 graph tokens）。"""
     return (
-        f"Determine the class of the given protein molecule. "
-        f"Output the final decision strictly as either 'Enzyme' or 'Non-enzyme'.\n"
+        f"Classify the following protein graph. "
+        f"Output strictly 1 (enzyme) or 0 (non-enzyme).\n"
         f"Graph statistics: "
         f"nodes={graph_stats.get('num_nodes', '?')}, "
         f"edges={graph_stats.get('num_edges', '?')}, "

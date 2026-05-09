@@ -129,14 +129,16 @@ class DynamicQueryConnector(nn.Module):
 # 3. LLM Projector（2 层 MLP）
 # ============================================================
 class LLMProjector(nn.Module):
-    """将 connector 输出投影到 LLM 词嵌入空间。"""
+    """将 connector 输出投影到 LLM 词嵌入空间。加宽中间层以增大信息带宽。"""
     def __init__(self, hidden_dim: int = 128, llm_dim: int = 2560):
         super().__init__()
+        mid_dim = hidden_dim * 4  # 128→512 而不是 128→256
         self.proj = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim * 2),
+            nn.Linear(hidden_dim, mid_dim),
             nn.GELU(),
-            nn.LayerNorm(hidden_dim * 2),
-            nn.Linear(hidden_dim * 2, llm_dim),
+            nn.LayerNorm(mid_dim),
+            nn.Dropout(0.1),
+            nn.Linear(mid_dim, llm_dim),
             nn.LayerNorm(llm_dim),
         )
 
@@ -293,15 +295,14 @@ class GraphLLMv2(nn.Module):
 
         # Domain Discriminator 已移除（实验证明有害）
 
-        # ---- 缓存 label token IDs ----
-        self._enzyme_ids = self.tokenizer.encode("Enzyme", add_special_tokens=False)
-        self._non_enzyme_ids = self.tokenizer.encode("Non-enzyme", add_special_tokens=False)
-        # 用于快速 logits 对比的首 token
-        self._enzyme_first_token = self._enzyme_ids[0]
-        self._non_enzyme_first_token = self._non_enzyme_ids[0]
-        print(f"[Labels] 'Enzyme' -> IDs: {self._enzyme_ids}, first={self._enzyme_first_token}")
-        print(f"[Labels] 'Non-enzyme' -> IDs: {self._non_enzyme_ids}, first={self._non_enzyme_first_token}")
-        print(f"[Labels] First tokens differ: {self._enzyme_first_token != self._non_enzyme_first_token}")
+        # ---- 缓存 label token IDs（使用 0/1，单 token 无偏差）----
+        self._token_1_ids = self.tokenizer.encode("1", add_special_tokens=False)
+        self._token_0_ids = self.tokenizer.encode("0", add_special_tokens=False)
+        self._token_1 = self._token_1_ids[0]  # "1" 的 token ID
+        self._token_0 = self._token_0_ids[0]  # "0" 的 token ID
+        print(f"[Labels] '1' -> token ID: {self._token_1}")
+        print(f"[Labels] '0' -> token ID: {self._token_0}")
+        print(f"[Labels] Tokens differ: {self._token_1 != self._token_0}")
 
         trainable = sum(p.numel() for p in self.trainable_parameters())
         total_llm = sum(p.numel() for p in self.llm.parameters())
@@ -416,29 +417,11 @@ class GraphLLMv2(nn.Module):
         return outputs.loss, accuracy
 
     # ----------------------------------------------------------
-    # 域对抗 Loss
-    # ----------------------------------------------------------
-    def compute_domain_loss(self, src_batch, tgt_batch,
-                            alpha: float = 1.0) -> torch.Tensor:
-        """在 soft tokens 层面做域对抗。"""
-        src_tokens = self.encode_graph(src_batch)  # [B_s, Q, llm_dim]
-        tgt_tokens = self.encode_graph(tgt_batch)  # [B_t, Q, llm_dim]
-
-        src_pred = self.domain_disc(src_tokens.float(), alpha)
-        tgt_pred = self.domain_disc(tgt_tokens.float(), alpha)
-
-        loss = (
-            F.binary_cross_entropy_with_logits(src_pred, torch.zeros_like(src_pred)) +
-            F.binary_cross_entropy_with_logits(tgt_pred, torch.ones_like(tgt_pred))
-        ) / 2.0
-        return loss
-
-    # ----------------------------------------------------------
-    # 推理：Logits 方式
+    # 推理：Logits 方式（比较 token "1" vs "0"）
     # ----------------------------------------------------------
     @torch.no_grad()
     def predict_logits(self, pyg_batch, prompts: List[str]) -> List[Dict]:
-        """用 LLM logits 做分类，比较 Enzyme vs Non-enzyme 首 token 概率。"""
+        """用 LLM logits 做分类，比较 token '1' vs '0' 的概率。"""
         self.call_count += len(prompts)
         B = len(prompts)
         soft_tokens = self.encode_graph(pyg_batch)
@@ -461,7 +444,7 @@ class GraphLLMv2(nn.Module):
             pad_len = max_len - batch_inputs_embeds[i].shape[0]
             if pad_len > 0:
                 batch_inputs_embeds[i] = torch.cat([pad_embed.repeat(pad_len, 1),
-                                                     batch_inputs_embeds[i]])
+                                                      batch_inputs_embeds[i]])
                 batch_attn[i] = [0]*pad_len + batch_attn[i]
 
         inputs_embeds = torch.stack(batch_inputs_embeds)
@@ -474,22 +457,21 @@ class GraphLLMv2(nn.Module):
         )
 
         last_logits = outputs.logits[:, -1, :]  # [B, vocab]
-        enz_logit = last_logits[:, self._enzyme_first_token]
-        non_logit = last_logits[:, self._non_enzyme_first_token]
-        binary_logits = torch.stack([non_logit, enz_logit], dim=-1)  # [B, 2]: [Non, Enz]
+        logit_1 = last_logits[:, self._token_1]  # P("1" = enzyme)
+        logit_0 = last_logits[:, self._token_0]  # P("0" = non-enzyme)
+        binary_logits = torch.stack([logit_0, logit_1], dim=-1)  # [B, 2]
         probs = F.softmax(binary_logits.float(), dim=-1)
 
         results = []
         for i in range(B):
-            p_enz = probs[i, 1].item()
-            p_non = probs[i, 0].item()
-            pred = 1 if p_enz > p_non else 0
+            p1 = probs[i, 1].item()  # P(class=1)
+            p0 = probs[i, 0].item()  # P(class=0)
+            pred = 1 if p1 > p0 else 0
             results.append({
                 'prediction': pred,
-                'prob_enzyme': p_enz,
-                'prob_non_enzyme': p_non,
-                'prob_1': p_enz,  # 兼容 V1 评估
-                'confidence': max(p_enz, p_non),
+                'prob_1': p1,
+                'prob_0': p0,
+                'confidence': max(p1, p0),
                 'method': 'logits_v2',
             })
         return results

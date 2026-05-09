@@ -111,8 +111,18 @@ def add_wl_features(data_list: List, name: str, num_iters: int = 2, num_bins: in
 # 完整数据准备流程
 # ================================================================
 def load_and_prepare(data_dir: str, source_name: str, target_name: str,
-                     wl_iters: int = 2, wl_bins: int = 16) -> Tuple:
-    """加载 + 统一特征 + 拓扑特征 + WL 标签。"""
+                     wl_iters: int = 2, wl_bins: int = 16,
+                     universal_only: bool = True) -> Tuple:
+    """
+    加载数据 + 特征工程。
+
+    universal_only=True（推荐）：
+      只用拓扑特征(8) + WL标签(16) = 24维
+      不使用原始特征，不需要零填充 → 消除域迁移的特征分布偏移
+
+    universal_only=False（传统）：
+      原始特征 + 零填充统一 + 拓扑 + WL = 113维
+    """
     src_ds = load_dataset(data_dir, source_name)
     tgt_ds = load_dataset(data_dir, target_name)
     ensure_node_features(src_ds, source_name)
@@ -120,12 +130,21 @@ def load_and_prepare(data_dir: str, source_name: str, target_name: str,
     src_list = dataset_to_list(src_ds)
     tgt_list = dataset_to_list(tgt_ds)
 
-    # 1. 零填充统一原始特征
-    unify_feature_dim_lists(src_list, tgt_list, source_name, target_name)
-    # 2. 拓扑特征
+    if universal_only:
+        # 只用通用特征：先把 x 置为空，再加 topo + WL
+        for data in src_list:
+            data.x = torch.zeros(data.num_nodes, 0, dtype=torch.float32)
+        for data in tgt_list:
+            data.x = torch.zeros(data.num_nodes, 0, dtype=torch.float32)
+        print(f"[Data] Universal-only mode: dropped original features")
+    else:
+        # 传统模式：零填充统一原始特征
+        unify_feature_dim_lists(src_list, tgt_list, source_name, target_name)
+
+    # 拓扑特征（8维）
     add_topo_features(src_list, source_name)
     add_topo_features(tgt_list, target_name)
-    # 3. WL 标签
+    # WL 标签（16维）
     unified_dim = add_wl_features(src_list, source_name, wl_iters, wl_bins)
     add_wl_features(tgt_list, target_name, wl_iters, wl_bins)
 

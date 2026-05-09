@@ -21,7 +21,7 @@ from experiments.v2.prompts import (
 class JointTrainer:
     """联合训练 GNN + Connector + Projector（+ 可选 Domain Disc）。"""
 
-    LABEL_MAP = {0: "Non-enzyme", 1: "Enzyme"}
+    LABEL_MAP = {0: "0", 1: "1"}
 
     def __init__(self, model, device: str = "cuda"):
         self.model = model
