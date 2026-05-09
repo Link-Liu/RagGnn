@@ -291,7 +291,7 @@ class GraphLLMv2(nn.Module):
             llm_dim=llm_dim,
         ).to(self.device)
 
-        self.domain_disc = DomainDiscriminator(llm_dim=llm_dim).to(self.device)
+        # Domain Discriminator 已移除（实验证明有害）
 
         # ---- 缓存 label token IDs ----
         self._enzyme_ids = self.tokenizer.encode("Enzyme", add_special_tokens=False)
@@ -299,6 +299,9 @@ class GraphLLMv2(nn.Module):
         # 用于快速 logits 对比的首 token
         self._enzyme_first_token = self._enzyme_ids[0]
         self._non_enzyme_first_token = self._non_enzyme_ids[0]
+        print(f"[Labels] 'Enzyme' -> IDs: {self._enzyme_ids}, first={self._enzyme_first_token}")
+        print(f"[Labels] 'Non-enzyme' -> IDs: {self._non_enzyme_ids}, first={self._non_enzyme_first_token}")
+        print(f"[Labels] First tokens differ: {self._enzyme_first_token != self._non_enzyme_first_token}")
 
         trainable = sum(p.numel() for p in self.trainable_parameters())
         total_llm = sum(p.numel() for p in self.llm.parameters())
@@ -308,8 +311,7 @@ class GraphLLMv2(nn.Module):
     def trainable_parameters(self):
         return (list(self.gnn.parameters())
                 + list(self.connector.parameters())
-                + list(self.projector.parameters())
-                + list(self.domain_disc.parameters()))
+                + list(self.projector.parameters()))
 
     # ----------------------------------------------------------
     # 前向：GNN → Connector → Projector → soft tokens
@@ -505,7 +507,7 @@ class GraphLLMv2(nn.Module):
     def load_checkpoint(self, path: str) -> bool:
         if not Path(path).exists():
             return False
-        state = torch.load(path, map_location='cpu')
+        state = torch.load(path, map_location='cpu', weights_only=False)
         self.gnn.load_state_dict(state['gnn'])
         self.connector.load_state_dict(state['connector'])
         self.projector.load_state_dict(state['projector'])

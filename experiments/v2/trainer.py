@@ -49,8 +49,8 @@ class JointTrainer:
         lr_gnn: float = 5e-5,
         lr_proj: float = 2e-4,
         grad_accum: int = 2,
-        lambda_domain: float = 0.1,
-        use_domain_adversarial: bool = True,
+        lambda_domain: float = 0.1,  # 保留参数但不再使用
+        use_domain_adversarial: bool = False,  # 默认关闭（实验证明有害）
     ):
         """联合训练。"""
         import random
@@ -68,8 +68,6 @@ class JointTrainer:
         n_train = int(0.8 * len(indices))
         train_idx, val_idx = indices[:n_train], indices[n_train:]
         print(f"  Source: {len(src_list)} total, train={len(train_idx)}, val={len(val_idx)}")
-        if use_domain_adversarial:
-            print(f"  Target: {len(tgt_list)} (unlabeled, for domain adversarial)")
 
         # ---- DataLoader ----
         class IdxDataset(torch.utils.data.Dataset):
@@ -114,10 +112,6 @@ class JointTrainer:
             {"params": self.model.connector.parameters(), "lr": lr_proj},
             {"params": self.model.projector.parameters(), "lr": lr_proj},
         ]
-        if use_domain_adversarial:
-            param_groups.append(
-                {"params": self.model.domain_disc.parameters(), "lr": lr_proj}
-            )
         optimizer = torch.optim.AdamW(param_groups, weight_decay=1e-5)
 
         # Scheduler
@@ -136,7 +130,6 @@ class JointTrainer:
         best_state = None
         patience, patience_limit = 0, 10
         use_amp = self.device == "cuda"
-        tgt_iter = iter(tgt_loader) if tgt_loader else None
 
         for epoch in range(1, epochs + 1):
             self.model.gnn.train()
@@ -146,9 +139,6 @@ class JointTrainer:
             epoch_loss, n_steps = 0.0, 0
             train_correct, train_total = 0, 0
 
-            # DANN alpha
-            p = (epoch - 1) / max(epochs - 1, 1)
-            dann_alpha = 2.0 / (1.0 + np.exp(-10.0 * p)) - 1.0
 
             for batch in train_loader:
                 batch = batch.to(self.device)
@@ -163,20 +153,6 @@ class JointTrainer:
                     loss = cls_loss / grad_accum
 
                 loss.backward()
-
-                # 域对抗
-                if use_domain_adversarial and tgt_iter is not None:
-                    try:
-                        tgt_batch = next(tgt_iter)
-                    except StopIteration:
-                        tgt_iter = iter(tgt_loader)
-                        tgt_batch = next(tgt_iter)
-                    tgt_batch = tgt_batch.to(self.device)
-
-                    domain_loss = self.model.compute_domain_loss(
-                        batch, tgt_batch, alpha=dann_alpha
-                    )
-                    (lambda_domain * domain_loss / grad_accum).backward()
 
                 n_steps += 1
                 epoch_loss += cls_loss.item()

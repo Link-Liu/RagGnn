@@ -142,7 +142,10 @@ def run_text_only_baseline(model, tgt_list, target_name, max_samples=200):
     from sklearn.metrics import roc_auc_score, accuracy_score, f1_score
 
     samples = tgt_list[:max_samples]
-    print(f"\n  [Text-Only] Evaluating {len(samples)} graphs ...")
+    import random as _rnd
+    _rnd.seed(42)
+    _rnd.shuffle(samples)
+    print(f"\n  [Text-Only] Evaluating {len(samples)} graphs (shuffled) ...")
 
     preds, trues, probs = [], [], []
     for data in samples:
@@ -177,7 +180,7 @@ def run_text_only_baseline(model, tgt_list, target_name, max_samples=200):
 def run_single(
     source_name: str, target_name: str,
     data_dir: str = "data",
-    use_domain_adversarial: bool = True,
+    use_domain_adversarial: bool = False,
     epochs: int = 50, batch_size: int = 8,
     run_text_only: bool = False,
 ):
@@ -210,7 +213,7 @@ def run_single(
     if not Path(gnn_ckpt).exists():
         _pretrain_gnn_v2(model.gnn, src_list, device, ckpt=gnn_ckpt)
     else:
-        model.gnn.load_state_dict(torch.load(gnn_ckpt, map_location='cpu'))
+        model.gnn.load_state_dict(torch.load(gnn_ckpt, map_location='cpu', weights_only=False))
         model.gnn.to(device)
         print(f"  [GNN] Loaded pretrained weights: {gnn_ckpt}")
 
@@ -266,24 +269,18 @@ def run_all(
         all_results[pair_key] = {}
 
         if run_ablation:
-            # 消融 1: Text-Only + w/o GRL
+            # 消融: Text-Only + Ours
             r = run_single(src, tgt, data_dir,
                            use_domain_adversarial=False, epochs=epochs,
                            batch_size=batch_size, run_text_only=True)
             all_results[pair_key]["text_only"] = r["text_only"]
-            all_results[pair_key]["no_grl"] = r["metrics"]
-
-            # 消融 2: Full（GRL）
-            r = run_single(src, tgt, data_dir,
-                           use_domain_adversarial=True, epochs=epochs,
-                           batch_size=batch_size, run_text_only=False)
-            all_results[pair_key]["full"] = r["metrics"]
+            all_results[pair_key]["ours"] = r["metrics"]
         else:
-            # 只跑 Full
+            # 只跑 Ours
             r = run_single(src, tgt, data_dir,
-                           use_domain_adversarial=True, epochs=epochs,
+                           use_domain_adversarial=False, epochs=epochs,
                            batch_size=batch_size, run_text_only=False)
-            all_results[pair_key]["full"] = r["metrics"]
+            all_results[pair_key]["ours"] = r["metrics"]
 
     # ---- 打印汇总表 ----
     _print_summary(all_results, run_ablation)
@@ -308,27 +305,20 @@ def _print_summary(results: Dict, ablation: bool):
         print(f"\n  {'Transfer Pair':<22s} {'Config':<16s} {'AUC':>8s} {'Acc':>8s} {'F1':>8s}")
         print(f"  {'─'*62}")
         for pair, data in results.items():
-            # Text-Only
             if data.get("text_only"):
                 tb = data["text_only"]
                 print(f"  {pair:<22s} {'Text-Only':<16s} "
                       f"{tb.get('auc',0):>8.4f} {tb.get('accuracy',0):>8.4f} {tb.get('f1',0):>8.4f}")
-            # w/o GRL
-            if data.get("no_grl"):
-                m = data["no_grl"]
-                print(f"  {'':<22s} {'w/o GRL':<16s} "
-                      f"{m.get('auc',0):>8.4f} {m.get('accuracy',0):>8.4f} {m.get('f1',0):>8.4f}")
-            # Full
-            if data.get("full"):
-                m = data["full"]
-                print(f"  {'':<22s} {'Full (GRL)':<16s} "
+            if data.get("ours"):
+                m = data["ours"]
+                print(f"  {'':<22s} {'Ours':<16s} "
                       f"{m.get('auc',0):>8.4f} {m.get('accuracy',0):>8.4f} {m.get('f1',0):>8.4f}")
             print(f"  {'─'*62}")
     else:
         print(f"\n  {'Transfer Pair':<22s} {'AUC':>8s} {'Acc':>8s} {'F1':>8s} {'Precision':>10s} {'Recall':>8s}")
         print(f"  {'─'*66}")
         for pair, data in results.items():
-            m = data.get("full", {})
+            m = data.get("ours", {})
             print(f"  {pair:<22s} {m.get('auc',0):>8.4f} {m.get('accuracy',0):>8.4f} "
                   f"{m.get('f1',0):>8.4f} {m.get('precision',0):>10.4f} {m.get('recall',0):>8.4f}")
 
